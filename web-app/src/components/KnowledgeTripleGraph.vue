@@ -38,20 +38,18 @@ const graphData = ref<EChartsGraphData>({ nodes: [], links: [] })
 
 const emptyHint = computed(() => facts.value.length === 0 && !loading.value)
 
-const labelToId = new Map<string, string>()
-let nextN = 0
-
-const entityId = (raw: string) => {
-  const label = (raw || '').trim() || '（空）'
-  if (!labelToId.has(label)) {
-    labelToId.set(label, `ent_${nextN++}`)
-  }
-  return labelToId.get(label)!
-}
-
 const buildVisData = () => {
-  labelToId.clear()
-  nextN = 0
+  const labelToId = new Map<string, string>()
+  let nextN = 0
+
+  const entityId = (raw: string) => {
+    const label = (raw || '').trim() || '（空）'
+    if (!labelToId.has(label)) {
+      labelToId.set(label, `ent_${nextN++}`)
+    }
+    return labelToId.get(label)!
+  }
+
   const nodeSeen = new Set<string>()
   const nodes: VisNode[] = []
   const edges: VisEdge[] = []
@@ -109,6 +107,9 @@ const reload = async () => {
     const res = await bookApi.getKnowledge(props.slug)
     facts.value = (res.facts || []) as Fact[]
     await redraw()
+  } catch (error) {
+    console.error('Failed to load knowledge graph:', error)
+    window.$message?.error('加载知识图谱失败，请稍后重试')
   } finally {
     loading.value = false
   }
