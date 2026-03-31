@@ -10,6 +10,7 @@ from domain.bible.value_objects.character_id import CharacterId
 from domain.ai.services.llm_service import GenerationResult, GenerationConfig
 from domain.ai.value_objects.prompt import Prompt
 from domain.ai.value_objects.token_usage import TokenUsage
+from domain.shared.exceptions import EntityNotFoundError
 from application.services.ai_generation_service import AIGenerationService
 
 
@@ -202,12 +203,16 @@ class TestAIGenerationService:
         mock_novel_repository.get_by_id.return_value = None
 
         # 执行并验证
-        with pytest.raises(ValueError, match="Novel not found: nonexistent"):
+        with pytest.raises(EntityNotFoundError) as exc_info:
             await service.generate_chapter(
                 novel_id="nonexistent",
                 chapter_number=1,
                 outline="测试大纲"
             )
+
+        # 验证异常信息
+        assert exc_info.value.entity_type == "Novel"
+        assert exc_info.value.entity_id == "nonexistent"
 
         # 验证没有调用 Bible 仓储和 LLM
         mock_bible_repository.get_by_novel_id.assert_not_called()
@@ -236,3 +241,59 @@ class TestAIGenerationService:
         # 验证 user message
         assert "第5章" in prompt.user
         assert "测试大纲内容" in prompt.user
+
+    @pytest.mark.asyncio
+    async def test_generate_chapter_empty_outline(
+        self,
+        service,
+        mock_novel_repository
+    ):
+        """测试空大纲时抛出异常"""
+        # 测试空字符串
+        with pytest.raises(ValueError, match="Outline cannot be empty"):
+            await service.generate_chapter(
+                novel_id="test-novel",
+                chapter_number=1,
+                outline=""
+            )
+
+        # 测试只有空格
+        with pytest.raises(ValueError, match="Outline cannot be empty"):
+            await service.generate_chapter(
+                novel_id="test-novel",
+                chapter_number=1,
+                outline="   "
+            )
+
+        # 验证没有调用仓储
+        mock_novel_repository.get_by_id.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_generate_chapter_llm_error(
+        self,
+        service,
+        mock_llm_service,
+        mock_novel_repository,
+        mock_bible_repository,
+        sample_novel
+    ):
+        """测试 LLM 调用失败时的异常处理"""
+        # 准备 mock 数据
+        mock_novel_repository.get_by_id.return_value = sample_novel
+        mock_bible_repository.get_by_novel_id.return_value = None
+
+        # Mock LLM 抛出异常
+        mock_llm_service.generate = AsyncMock(side_effect=Exception("LLM service unavailable"))
+
+        # 执行并验证
+        with pytest.raises(RuntimeError, match="Failed to generate chapter"):
+            await service.generate_chapter(
+                novel_id="test-novel",
+                chapter_number=1,
+                outline="测试大纲"
+            )
+
+        # 验证调用了仓储
+        mock_novel_repository.get_by_id.assert_called_once()
+        mock_bible_repository.get_by_novel_id.assert_called_once()
+

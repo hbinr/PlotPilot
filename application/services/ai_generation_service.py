@@ -1,4 +1,5 @@
 """AI 生成应用服务"""
+import logging
 from typing import Optional
 from domain.ai.services.llm_service import LLMService, GenerationConfig
 from domain.ai.value_objects.prompt import Prompt
@@ -7,6 +8,9 @@ from domain.bible.repositories.bible_repository import BibleRepository
 from domain.novel.value_objects.novel_id import NovelId
 from domain.novel.entities.novel import Novel
 from domain.bible.entities.bible import Bible
+from domain.shared.exceptions import EntityNotFoundError
+
+logger = logging.getLogger(__name__)
 
 
 class AIGenerationService:
@@ -25,8 +29,12 @@ class AIGenerationService:
 
         Args:
             llm_service: LLM 服务
-            novel_repository: Novel 仓储
-            bible_repository: Bible 仓储
+            novel_repository: Novel 仓储（同步设计，应用层负责协调）
+            bible_repository: Bible 仓储（同步设计，应用层负责协调）
+
+        Note:
+            仓储使用同步接口是设计决策，应用层服务负责异步协调。
+            这样可以保持领域层简单，避免异步复杂性传播到领域模型。
         """
         self.llm_service = llm_service
         self.novel_repository = novel_repository
@@ -49,12 +57,18 @@ class AIGenerationService:
             生成的章节内容
 
         Raises:
-            ValueError: 如果小说不存在
+            EntityNotFoundError: 如果小说不存在
+            ValueError: 如果输入参数无效
+            RuntimeError: 如果 LLM 生成失败
         """
+        # 验证输入
+        if not outline or not outline.strip():
+            raise ValueError("Outline cannot be empty")
+
         # 1. 获取小说
         novel = self.novel_repository.get_by_id(NovelId(novel_id))
         if novel is None:
-            raise ValueError(f"Novel not found: {novel_id}")
+            raise EntityNotFoundError("Novel", novel_id)
 
         # 2. 获取 Bible（可选）
         bible = self.bible_repository.get_by_novel_id(NovelId(novel_id))
@@ -63,10 +77,14 @@ class AIGenerationService:
         prompt = self._build_chapter_prompt(novel, bible, chapter_number, outline)
 
         # 4. 调用 LLM
-        config = GenerationConfig()
-        result = await self.llm_service.generate(prompt, config)
-
-        return result.content
+        try:
+            config = GenerationConfig()
+            result = await self.llm_service.generate(prompt, config)
+            logger.info(f"Successfully generated chapter {chapter_number} for novel {novel_id}")
+            return result.content
+        except Exception as e:
+            logger.error(f"LLM generation failed for novel {novel_id}, chapter {chapter_number}: {str(e)}")
+            raise RuntimeError(f"Failed to generate chapter: {str(e)}") from e
 
     def _build_chapter_prompt(
         self,
