@@ -247,7 +247,7 @@ const data = ref({
 
 const saving = ref(false)
 const generating = ref(false)
-const sideTab = ref<'narrative' | 'graph' | 'triple'>('narrative')
+const sideTab = ref<'narrative' | 'graph' | 'knowledge'>('narrative')
 const subTab = ref<'search' | 'premise' | 'chapters' | 'facts'>('search')
 const outlineTitles = ref<Record<number, string>>({})
 const searchQ = ref('')
