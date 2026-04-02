@@ -4,5 +4,46 @@
   "author": "作者",
   "target_chapters": 10,
   "stage": "planning",
-  "chapters": []
+  "chapters": [
+    {
+      "id": "novel-1775150981848-chapter-1",
+      "novel_id": "novel-1775150981848",
+      "number": 1,
+      "title": "第1章",
+      "content": "",
+      "word_count": 0
+    },
+    {
+      "id": "novel-1775150981848-chapter-2",
+      "novel_id": "novel-1775150981848",
+      "number": 2,
+      "title": "第2章",
+      "content": "",
+      "word_count": 0
+    },
+    {
+      "id": "novel-1775150981848-chapter-3",
+      "novel_id": "novel-1775150981848",
+      "number": 3,
+      "title": "第3章",
+      "content": "",
+      "word_count": 0
+    },
+    {
+      "id": "novel-1775150981848-chapter-4",
+      "novel_id": "novel-1775150981848",
+      "number": 4,
+      "title": "第4章",
+      "content": "",
+      "word_count": 0
+    },
+    {
+      "id": "novel-1775150981848-chapter-5",
+      "novel_id": "novel-1775150981848",
+      "number": 5,
+      "title": "第5章",
+      "content": "",
+      "word_count": 0
+    }
+  ]
 }

@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "premise_lock": "林晨意外获得风水天赋，在江城以风水师身份破解各类悬疑案件，凭借环境学和心理学知识帮助他人，逐步成长为顶尖风水大师，同时卷入更深层的玄学谜团。",
+  "chapters": [],
+  "facts": [
+    {
+      "id": "fact-001",
+      "subject": "林晨",
+      "predicate": "是",
+      "object": "主角，新晋风水师",
+      "chapter_id": null,
+      "note": "意外获得风水天赋"
+    },
+    {
+      "id": "fact-002",
+      "subject": "苏婉清",
+      "predicate": "是",
+      "object": "重要角色",
+      "chapter_id": null,
+      "note": "与林晨关系密切"
+    },
+    {
+      "id": "fact-003",
+      "subject": "钱老",
+      "predicate": "是",
+      "object": "重要角色",
+      "chapter_id": null,
+      "note": "可能是林晨的引路人或客户"
+    },
+    {
+      "id": "fact-004",
+      "subject": "江城",
+      "predicate": "是",
+      "object": "故事主要发生地",
+      "chapter_id": null,
+      "note": "都市背景"
+    },
+    {
+      "id": "fact-005",
+      "subject": "云顶山庄",
+      "predicate": "位于",
+      "object": "江城",
+      "chapter_id": null,
+      "note": "重要地点"
+    },
+    {
+      "id": "fact-006",
+      "subject": "清风观",
+      "predicate": "位于",
+      "object": "江城",
+      "chapter_id": null,
+      "note": "重要地点，可能与玄学相关"
+    },
+    {
+      "id": "fact-007",
+      "subject": "林晨",
+      "predicate": "能力是",
+      "object": "运用环境学和心理学解释风水",
+      "chapter_id": null,
+      "note": "避免封建迷信"
+    },
+    {
+      "id": "fact-008",
+      "subject": "林晨",
+      "predicate": "目标是",
+      "object": "成为顶尖风水大师",
+      "chapter_id": null,
+      "note": "成长主线"
+    }
+  ]
+}
