@@ -1,7 +1,22 @@
 <template>
   <div class="right-panel">
-    <BiblePanel v-if="currentPanel === 'bible'" :key="bibleKey" :slug="slug" />
-    <KnowledgePanel v-else :slug="slug" />
+    <n-tabs v-model:value="activeTab" type="line" size="medium" animated class="settings-tabs">
+      <n-tab-pane name="bible" tab="世界观">
+        <BiblePanel :key="bibleKey" :slug="slug" />
+      </n-tab-pane>
+
+      <n-tab-pane name="knowledge" tab="知识库">
+        <KnowledgePanel :slug="slug" />
+      </n-tab-pane>
+
+      <n-tab-pane name="storylines" tab="故事线">
+        <StorylinePanel :slug="slug" />
+      </n-tab-pane>
+
+      <n-tab-pane name="plot-arc" tab="情节弧线">
+        <PlotArcPanel :slug="slug" />
+      </n-tab-pane>
+    </n-tabs>
 
     <!-- Chapter Info Card -->
     <div v-if="currentChapter" class="chapter-info-card">
@@ -34,8 +49,11 @@
 </template>
 
 <script setup lang="ts">
+import { ref, watch } from 'vue'
 import BiblePanel from '../BiblePanel.vue'
 import KnowledgePanel from '../KnowledgePanel.vue'
+import StorylinePanel from './StorylinePanel.vue'
+import PlotArcPanel from './PlotArcPanel.vue'
 
 interface Chapter {
   id: number
@@ -52,10 +70,16 @@ interface Props {
   currentChapter?: Chapter | null
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   currentPanel: 'bible',
   bibleKey: 0,
   currentChapter: null,
+})
+
+const activeTab = ref<string>(props.currentPanel)
+
+watch(() => props.currentPanel, (newVal) => {
+  activeTab.value = newVal
 })
 </script>
 
@@ -68,6 +92,30 @@ withDefaults(defineProps<Props>(), {
   overflow: hidden;
   background: var(--aitext-panel-muted);
   border-left: 1px solid var(--aitext-split-border);
+}
+
+.settings-tabs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-tabs :deep(.n-tabs-nav) {
+  padding: 0 16px;
+  background: var(--app-surface);
+  border-bottom: 1px solid var(--aitext-split-border);
+}
+
+.settings-tabs :deep(.n-tabs-content) {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.settings-tabs :deep(.n-tab-pane) {
+  height: 100%;
+  overflow: hidden;
 }
 
 .chapter-info-card {
