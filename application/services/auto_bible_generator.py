@@ -10,6 +10,7 @@ from application.services.bible_service import BibleService
 from application.services.worldbuilding_service import WorldbuildingService
 from domain.bible.triple import Triple, SourceType
 from infrastructure.persistence.database.triple_repository import TripleRepository
+from domain.bible.exceptions import EntityNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -81,10 +82,10 @@ class AutoBibleGenerator:
         elif stage == "worldbuilding":
             # 确保Bible记录存在
             try:
-                self.bible_repository.get_bible_by_novel(novel_id)
+                self.bible_service.get_bible(novel_id)
             except EntityNotFoundError:
                 bible_id = f"bible-{novel_id}"
-                self.bible_repository.create_bible(bible_id, novel_id)
+                self.bible_service.create_bible(bible_id, novel_id)
                 logger.info(f"Created Bible record: {bible_id}")
 
             # 只生成世界观和文风
