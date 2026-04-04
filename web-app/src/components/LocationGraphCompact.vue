@@ -266,7 +266,7 @@ onMounted(async () => {
 /* 与 CastGraphCompact 一致：侧栏 flex 内 height:100% 需可解析的块高，否则 ECharts 高度为 0 不可见 */
 .lgc-canvas {
   flex: 1;
-  min-height: 220px;
+  min-height: 500px;
   width: 100%;
   position: relative;
 }

@@ -4,7 +4,7 @@
       <div class="kp-hero-copy">
         <h3 class="kp-title">侧栏资料</h3>
         <p class="kp-lead">
-          可在「检索」「叙事知识」「关系图」「知识库」间切换：检索全书知识；叙事含梗概锁定、章摘要；<strong>关系图从知识库三元组自动生成</strong>（人物网 / 地点图全页与工作台知识库均可打开「三元组表格」编辑）。书目级梗概以
+          可在「检索与编辑」「叙事知识」「关系图」间切换：检索与编辑含全书知识检索、三元组图谱与表格编辑；叙事含梗概锁定、章摘要；<strong>关系图从知识库三元组自动生成</strong>（人物网 / 地点图全页与工作台均可打开「三元组表格」编辑）。书目级梗概以
           <strong>manifest</strong> 为准。
         </p>
       </div>
@@ -31,14 +31,14 @@
     </header>
 
     <n-radio-group v-model:value="sideTab" class="kp-seg" size="small">
-      <n-radio-button value="search">检索</n-radio-button>
+      <n-radio-button value="search">检索与编辑</n-radio-button>
       <n-radio-button value="narrative">叙事知识</n-radio-button>
       <n-radio-button value="graph">关系图</n-radio-button>
-      <n-radio-button value="knowledge">知识库</n-radio-button>
     </n-radio-group>
 
     <div v-show="sideTab === 'search'" class="kp-search-container">
-      <n-card class="kp-search" size="small" :bordered="false">
+      <!-- 搜索区域 -->
+      <n-card class="kp-search-card" size="small" :bordered="false">
         <n-space align="center" :size="10" wrap>
           <n-input
             v-model:value="searchQ"
@@ -67,10 +67,51 @@
             <div class="kp-hit-text">{{ h.text }}</div>
           </div>
         </div>
-        <div v-else class="kp-search-empty">
+        <div v-else-if="!searching" class="kp-search-empty">
           <n-text depth="3" style="font-size: 12px">提示：先用工具把资料写入侧栏，检索命中会更稳定。</n-text>
         </div>
       </n-card>
+
+      <!-- 编辑区域 -->
+      <div class="kp-edit-section">
+        <div class="kp-edit-header">
+          <n-text depth="3" style="font-size: 12px">
+            三元组编辑：图谱总览、JSON 批量编辑、表格编辑
+          </n-text>
+          <n-space :size="8">
+            <n-button size="small" secondary @click="knowledgeTableOpen = true">三元组表格</n-button>
+            <n-button size="small" quaternary :loading="knowledgeLoading" @click="reloadKnowledge">刷新</n-button>
+          </n-space>
+        </div>
+
+        <div class="kp-edit-toolbar">
+          <n-button-group size="small">
+            <n-button :type="knowledgeView === 'graph' ? 'primary' : 'default'" @click="knowledgeView = 'graph'">
+              图谱
+            </n-button>
+            <n-button :type="knowledgeView === 'json' ? 'primary' : 'default'" @click="knowledgeView = 'json'">
+              JSON
+            </n-button>
+          </n-button-group>
+        </div>
+
+        <div class="kp-edit-content">
+          <KnowledgeGraphView v-if="knowledgeView === 'graph'" :slug="slug" @reload="reloadKnowledge" />
+          <KnowledgeJsonView v-if="knowledgeView === 'json'" :slug="slug" @reload="reloadKnowledge" />
+        </div>
+      </div>
+
+      <!-- 三元组表格抽屉 -->
+      <n-drawer v-model:show="knowledgeTableOpen" :width="920" placement="right" display-directive="if">
+        <n-drawer-content title="三元组表格" closable>
+          <KnowledgeTriplesTableEditor
+            v-if="knowledgeTableOpen"
+            :slug="slug"
+            default-entity-filter="all"
+            @saved="onKnowledgeTableSaved"
+          />
+        </n-drawer-content>
+      </n-drawer>
     </div>
 
     <div v-show="sideTab === 'narrative'" class="kp-narrative-container">
@@ -210,6 +251,7 @@
         </section>
       </n-tab-pane>
     </n-tabs>
+    </div>
 
     <div v-if="sideTab === 'graph'" class="kp-graph-container">
       <div class="kp-graph-nav">
@@ -239,7 +281,6 @@
       <CastGraphCompact v-if="graphFilter === 'character'" :slug="slug" class="kp-graph-embed" />
       <LocationGraphCompact v-if="graphFilter === 'location'" :slug="slug" class="kp-graph-embed" />
     </div>
-    <KnowledgeBase v-if="sideTab === 'knowledge'" :slug="slug" class="kp-graph-embed" />
   </div>
 </template>
 
@@ -252,7 +293,9 @@ import { chapterApi } from '../api/chapter'
 import { knowledgeApi } from '../api/knowledge'
 import CastGraphCompact from './CastGraphCompact.vue'
 import LocationGraphCompact from './LocationGraphCompact.vue'
-import KnowledgeBase from './KnowledgeBase.vue'
+import KnowledgeGraphView from './KnowledgeGraphView.vue'
+import KnowledgeJsonView from './KnowledgeJsonView.vue'
+import KnowledgeTriplesTableEditor from './KnowledgeTriplesTableEditor.vue'
 
 
 const props = defineProps<{ slug: string }>()
@@ -261,6 +304,11 @@ const message = useMessage()
 
 // 关系图过滤器：切换人物/地点
 const graphFilter = ref<'character' | 'location'>('character')
+
+// 知识库编辑相关
+const knowledgeView = ref<'graph' | 'json'>('graph')
+const knowledgeTableOpen = ref(false)
+const knowledgeLoading = ref(false)
 
 interface Ch {
   chapter_id: number
@@ -280,7 +328,7 @@ const data = ref({
 
 const saving = ref(false)
 const generating = ref(false)
-const sideTab = ref<'search' | 'narrative' | 'graph' | 'knowledge'>('search')
+const sideTab = ref<'search' | 'narrative' | 'graph'>('search')
 const subTab = ref<'premise' | 'chapters'>('premise')
 const outlineTitles = ref<Record<number, string>>({})
 const searchQ = ref('')
@@ -425,6 +473,19 @@ const removeChapterById = (cid: number) => {
 
 const goCastChapter = (cid: number) => {
   router.push({ path: `/book/${props.slug}/cast`, query: { chapter: String(cid) } })
+}
+
+const reloadKnowledge = () => {
+  knowledgeLoading.value = true
+  // 触发子组件重新加载
+  window.dispatchEvent(new CustomEvent('aitext:knowledge:reload'))
+  setTimeout(() => {
+    knowledgeLoading.value = false
+  }, 500)
+}
+
+const onKnowledgeTableSaved = () => {
+  reloadKnowledge()
 }
 
 watch(
@@ -684,6 +745,132 @@ onMounted(() => {
 .kp-seg {
   flex-shrink: 0;
   margin-bottom: 10px;
+}
+
+.kp-search-container {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.kp-search-card {
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  flex-shrink: 0;
+}
+
+.kp-edit-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.kp-edit-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  background: rgba(248, 250, 252, 0.6);
+  flex-shrink: 0;
+}
+
+.kp-edit-toolbar {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  background: #fafafa;
+  flex-shrink: 0;
+}
+
+.kp-edit-content {
+  flex: 1;
+  min-height: 500px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.kp-knowledge-section {
+  flex: 1;
+  min-height: 400px;
+  display: flex;
+  flex-direction: column;
+}
+
+.kp-narrative-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.kp-search-input {
+  flex: 1;
+  min-width: 200px;
+}
+
+.kp-search-list {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.kp-hit {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.kp-hit:hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+}
+
+.kp-hit.active {
+  background: #eff6ff;
+  border-color: #3b82f6;
+}
+
+.kp-hit-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.kp-hit-id {
+  font-size: 11px;
+  color: #9ca3af;
+  font-family: monospace;
+}
+
+.kp-hit-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #374151;
+}
+
+.kp-search-empty {
+  margin-top: 20px;
+  text-align: center;
+  padding: 40px 20px;
 }
 
 .kp-graph-embed {

@@ -232,7 +232,7 @@ onMounted(async () => {
 
 .cgc-canvas {
   flex: 1;
-  min-height: 220px;
+  min-height: 500px;
   width: 100%;
 }
 
