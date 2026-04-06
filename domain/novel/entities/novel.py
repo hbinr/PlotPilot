@@ -1,6 +1,6 @@
 # domain/novel/entities/novel.py
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from domain.shared.base_entity import BaseEntity
 from domain.novel.value_objects.novel_id import NovelId
 from domain.novel.entities.chapter import Chapter, ChapterStatus
@@ -41,7 +41,7 @@ class Novel(BaseEntity):
         current_stage: NovelStage = NovelStage.PLANNING,
         current_act: int = 0,
         current_chapter_in_act: int = 0,
-        max_auto_chapters: int = 50,
+        max_auto_chapters: int = 9999,  # 保护上限，默认几乎无限制，由 target_chapters 控制实际完成点
         current_auto_chapters: int = 0,
         last_chapter_tension: int = 0,
         consecutive_error_count: int = 0,
@@ -51,35 +51,51 @@ class Novel(BaseEntity):
         last_audit_drift_alert: bool = False,
         last_audit_narrative_ok: bool = True,
         last_audit_at: Optional[str] = None,
+        # 章后管线状态
+        last_audit_vector_stored: bool = False,
+        last_audit_foreshadow_stored: bool = False,
+        last_audit_triples_extracted: bool = False,
+        last_audit_quality_scores: Optional[Dict[str, float]] = None,
+        last_audit_issues: Optional[List[Dict[str, str]]] = None,
+        # 目标字数控制
+        target_words_per_chapter: int = 3500,
     ):
         super().__init__(id.value)
-        self.novel_id = id  # 存储 NovelId 对象
+        self.novel_id = id
         self.title = title
         self.author = author
         self.target_chapters = target_chapters
-        self.premise = premise  # 故事梗概/创意
+        self.premise = premise
         self.stage = stage
         self.chapters: List[Chapter] = []
 
         # 自动驾驶状态
         self.autopilot_status = autopilot_status
-        self.current_stage = current_stage  # 当前阶段（状态机）
-        self.current_act = current_act  # 当前幕号（从 0 开始）
-        self.current_chapter_in_act = current_chapter_in_act  # 当前幕内章节号（从 0 开始）
+        self.current_stage = current_stage
+        self.current_act = current_act
+        self.current_chapter_in_act = current_chapter_in_act
 
         # 护城河字段
-        self.max_auto_chapters = max_auto_chapters  # 成本控制上限
-        self.current_auto_chapters = current_auto_chapters  # 已生成章节数
-        self.last_chapter_tension = last_chapter_tension  # 上章张力值（1-10）
-        self.consecutive_error_count = consecutive_error_count  # 连续失败计数
-        self.current_beat_index = current_beat_index  # 当前节拍索引（断点续写）
+        self.max_auto_chapters = max_auto_chapters
+        self.current_auto_chapters = current_auto_chapters
+        self.last_chapter_tension = last_chapter_tension
+        self.consecutive_error_count = consecutive_error_count
+        self.current_beat_index = current_beat_index
 
-        # 全托管章末审阅快照（供 API / 前台「章节状态」展示）
+        # 全托管章末审阅快照
         self.last_audit_chapter_number = last_audit_chapter_number
         self.last_audit_similarity = last_audit_similarity
         self.last_audit_drift_alert = last_audit_drift_alert
         self.last_audit_narrative_ok = last_audit_narrative_ok
         self.last_audit_at = last_audit_at
+        # 章后管线状态
+        self.last_audit_vector_stored = last_audit_vector_stored
+        self.last_audit_foreshadow_stored = last_audit_foreshadow_stored
+        self.last_audit_triples_extracted = last_audit_triples_extracted
+        self.last_audit_quality_scores = last_audit_quality_scores or {}
+        self.last_audit_issues = last_audit_issues or []
+        # 目标字数控制
+        self.target_words_per_chapter = target_words_per_chapter
 
     def add_chapter(self, chapter: Chapter) -> None:
         """添加章节（必须连续）"""
@@ -102,3 +118,7 @@ class Novel(BaseEntity):
         for chapter in self.chapters:
             total = total + chapter.word_count
         return total
+
+    def get_expected_total_words(self) -> int:
+        """获取预期总字数"""
+        return self.target_chapters * self.target_words_per_chapter

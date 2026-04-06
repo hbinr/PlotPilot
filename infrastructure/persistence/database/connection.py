@@ -137,6 +137,25 @@ def _apply_last_chapter_audit_columns(conn: sqlite3.Connection) -> None:
             "ALTER TABLE novels ADD COLUMN last_audit_narrative_ok INTEGER DEFAULT 1"
         ),
         "last_audit_at": "ALTER TABLE novels ADD COLUMN last_audit_at TEXT",
+        # 章后管线状态
+        "last_audit_vector_stored": (
+            "ALTER TABLE novels ADD COLUMN last_audit_vector_stored INTEGER DEFAULT 0"
+        ),
+        "last_audit_foreshadow_stored": (
+            "ALTER TABLE novels ADD COLUMN last_audit_foreshadow_stored INTEGER DEFAULT 0"
+        ),
+        "last_audit_triples_extracted": (
+            "ALTER TABLE novels ADD COLUMN last_audit_triples_extracted INTEGER DEFAULT 0"
+        ),
+        "last_audit_quality_scores": (
+            "ALTER TABLE novels ADD COLUMN last_audit_quality_scores TEXT"
+        ),
+        "last_audit_issues": (
+            "ALTER TABLE novels ADD COLUMN last_audit_issues TEXT"
+        ),
+        "target_words_per_chapter": (
+            "ALTER TABLE novels ADD COLUMN target_words_per_chapter INTEGER DEFAULT 3500"
+        ),
     }
     for col, sql in migrations.items():
         if col not in cols:

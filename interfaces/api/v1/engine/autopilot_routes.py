@@ -77,7 +77,7 @@ def _autopilot_status_zh(status: str) -> str:
 
 
 class StartRequest(BaseModel):
-    max_auto_chapters: Optional[int] = 50  # 本次托管最大章节数
+    max_auto_chapters: Optional[int] = 9999  # 保护上限，默认几乎无限制，由 target_chapters 控制实际完成点
 
 
 @router.post("/{novel_id}/start")
@@ -105,9 +105,10 @@ async def start_autopilot(novel_id: str, body: StartRequest = StartRequest()):
     repo.save(novel)
     return {
         "success": True,
-        "message": f"自动驾驶已启动，目标 {body.max_auto_chapters} 章",
+        "message": f"自动驾驶已启动，目标 {novel.target_chapters} 章（保护上限 {body.max_auto_chapters} 章）",
         "autopilot_status": novel.autopilot_status.value,
         "current_stage": novel.current_stage.value,
+        "target_chapters": novel.target_chapters,
     }
 
 
@@ -176,6 +177,12 @@ async def get_autopilot_status(novel_id: str):
             "similarity_score": getattr(novel, "last_audit_similarity", None),
             "narrative_sync_ok": bool(getattr(novel, "last_audit_narrative_ok", True)),
             "at": getattr(novel, "last_audit_at", None),
+            # 章后管线状态
+            "vector_stored": bool(getattr(novel, "last_audit_vector_stored", False)),
+            "foreshadow_stored": bool(getattr(novel, "last_audit_foreshadow_stored", False)),
+            "triples_extracted": bool(getattr(novel, "last_audit_triples_extracted", False)),
+            "quality_scores": getattr(novel, "last_audit_quality_scores", {}) or {},
+            "issues": getattr(novel, "last_audit_issues", []) or [],
         }
 
     return {

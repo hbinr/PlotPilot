@@ -1,5 +1,6 @@
 """SQLite Novel Repository 实现"""
 import logging
+import json
 from typing import Optional, List
 from datetime import datetime
 from domain.novel.entities.novel import Novel, AutopilotStatus, NovelStage
@@ -26,9 +27,12 @@ class SqliteNovelRepository(NovelRepository):
                 consecutive_error_count, current_beat_index,
                 last_audit_chapter_number, last_audit_similarity, last_audit_drift_alert,
                 last_audit_narrative_ok, last_audit_at,
+                last_audit_vector_stored, last_audit_foreshadow_stored,
+                last_audit_triples_extracted, last_audit_quality_scores, last_audit_issues,
+                target_words_per_chapter,
                 created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 slug = excluded.slug,
@@ -49,11 +53,17 @@ class SqliteNovelRepository(NovelRepository):
                 last_audit_drift_alert = excluded.last_audit_drift_alert,
                 last_audit_narrative_ok = excluded.last_audit_narrative_ok,
                 last_audit_at = excluded.last_audit_at,
+                last_audit_vector_stored = excluded.last_audit_vector_stored,
+                last_audit_foreshadow_stored = excluded.last_audit_foreshadow_stored,
+                last_audit_triples_extracted = excluded.last_audit_triples_extracted,
+                last_audit_quality_scores = excluded.last_audit_quality_scores,
+                last_audit_issues = excluded.last_audit_issues,
+                target_words_per_chapter = excluded.target_words_per_chapter,
                 updated_at = excluded.updated_at
         """
         now = datetime.utcnow().isoformat()
         novel_id = novel.novel_id.value if hasattr(novel, 'novel_id') else novel.id
-        slug = novel_id  # 使用 novel_id 作为唯一 slug
+        slug = novel_id
         premise = getattr(novel, 'premise', '')
         author = getattr(novel, 'author', '未知作者')
         _ap = getattr(novel, 'autopilot_status', 'stopped')
@@ -72,6 +82,15 @@ class SqliteNovelRepository(NovelRepository):
         ladr = 1 if getattr(novel, "last_audit_drift_alert", False) else 0
         lano = 1 if getattr(novel, "last_audit_narrative_ok", True) else 0
         laat = getattr(novel, "last_audit_at", None)
+        # 新增字段
+        lavs = 1 if getattr(novel, "last_audit_vector_stored", False) else 0
+        lafs = 1 if getattr(novel, "last_audit_foreshadow_stored", False) else 0
+        late = 1 if getattr(novel, "last_audit_triples_extracted", False) else 0
+        laqs = getattr(novel, "last_audit_quality_scores", {})
+        laqs_json = json.dumps(laqs) if laqs else None
+        lai = getattr(novel, "last_audit_issues", [])
+        lai_json = json.dumps(lai) if lai else None
+        twpc = getattr(novel, "target_words_per_chapter", 3500)
 
         self.db.execute(sql, (
             novel_id,
@@ -94,6 +113,12 @@ class SqliteNovelRepository(NovelRepository):
             ladr,
             lano,
             laat,
+            lavs,
+            lafs,
+            late,
+            laqs_json,
+            lai_json,
+            twpc,
             now,
             now
         ))
@@ -101,7 +126,6 @@ class SqliteNovelRepository(NovelRepository):
 
     async def async_save(self, novel: Novel) -> None:
         """异步保存小说（守护进程使用）"""
-        # SQLite 是同步的，直接调用 save
         self.save(novel)
 
     def get_by_id(self, novel_id: NovelId) -> Optional[Novel]:
@@ -152,6 +176,13 @@ class SqliteNovelRepository(NovelRepository):
 
         _lad = row.get("last_audit_drift_alert")
         _lano = row.get("last_audit_narrative_ok")
+        
+        # 解析 JSON 字段
+        laqs_json = row.get("last_audit_quality_scores")
+        laqs = json.loads(laqs_json) if laqs_json else {}
+        lai_json = row.get("last_audit_issues")
+        lai = json.loads(lai_json) if lai_json else []
+        
         return Novel(
             id=novel_id,
             title=row['title'],
@@ -172,6 +203,12 @@ class SqliteNovelRepository(NovelRepository):
             last_audit_drift_alert=bool(_lad) if _lad is not None else False,
             last_audit_narrative_ok=bool(_lano) if _lano is not None else True,
             last_audit_at=row.get("last_audit_at"),
+            last_audit_vector_stored=bool(row.get("last_audit_vector_stored", 0)),
+            last_audit_foreshadow_stored=bool(row.get("last_audit_foreshadow_stored", 0)),
+            last_audit_triples_extracted=bool(row.get("last_audit_triples_extracted", 0)),
+            last_audit_quality_scores=laqs,
+            last_audit_issues=lai,
+            target_words_per_chapter=row.get("target_words_per_chapter", 3500),
         )
 
     def delete(self, novel_id: NovelId) -> None:
