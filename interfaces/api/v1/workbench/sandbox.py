@@ -22,6 +22,13 @@ class CharacterAnchorResponse(BaseModel):
     idle_behavior: str
 
 
+class UpdateCharacterAnchorRequest(BaseModel):
+    """保存角色声线锚点到 Bible（bible_characters）"""
+    mental_state: str = "NORMAL"
+    verbal_tic: str = ""
+    idle_behavior: str = ""
+
+
 class GenerateDialogueRequest(BaseModel):
     """生成对话请求"""
     novel_id: str
@@ -29,6 +36,7 @@ class GenerateDialogueRequest(BaseModel):
     scene_prompt: str
     mental_state: Optional[str] = None
     verbal_tic: Optional[str] = None
+    idle_behavior: Optional[str] = None
 
 
 class GenerateDialogueResponse(BaseModel):
@@ -103,15 +111,12 @@ async def get_character_anchor(
         if not character:
             raise HTTPException(status_code=404, detail=f"Character {character_id} not found")
 
-        # 提取心理锚点（从角色描述中解析，或使用默认值）
-        # 注意：Character 实体只有 id, name, description, relationships 字段
-        # 这里返回基于角色名称的默认锚点数据
         return CharacterAnchorResponse(
             character_id=character_id,
             character_name=character.name,
-            mental_state="平静",
-            verbal_tic="...",
-            idle_behavior="思考"
+            mental_state=getattr(character, "mental_state", None) or "NORMAL",
+            verbal_tic=getattr(character, "verbal_tic", None) or "",
+            idle_behavior=getattr(character, "idle_behavior", None) or "",
         )
 
     except HTTPException:
@@ -119,6 +124,39 @@ async def get_character_anchor(
     except Exception as e:
         logger.error(f"Error fetching character anchor: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch character anchor")
+
+
+@router.patch(
+    "/{novel_id}/sandbox/character/{character_id}/anchor",
+    response_model=CharacterAnchorResponse,
+)
+async def patch_character_anchor(
+    novel_id: str,
+    character_id: str,
+    request: UpdateCharacterAnchorRequest,
+    bible_service=Depends(get_bible_service),
+):
+    """将心理状态、口头禅、待机动作写入 bible_characters。"""
+    from domain.shared.exceptions import EntityNotFoundError
+
+    try:
+        dto = bible_service.update_character_voice_anchors(
+            novel_id,
+            character_id,
+            mental_state=request.mental_state,
+            verbal_tic=request.verbal_tic,
+            idle_behavior=request.idle_behavior,
+        )
+    except EntityNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+    return CharacterAnchorResponse(
+        character_id=dto.id,
+        character_name=dto.name,
+        mental_state=dto.mental_state,
+        verbal_tic=dto.verbal_tic,
+        idle_behavior=dto.idle_behavior,
+    )
 
 
 @router.post("/sandbox/generate-dialogue", response_model=GenerateDialogueResponse)
@@ -133,30 +171,43 @@ async def generate_dialogue(
     根据角色锚点和场景描述，生成符合角色特征的对话
     """
     try:
-        # 获取角色信息
-        character = bible_service.get_character(request.novel_id, request.character_id)
-
-        if not character:
+        bible = bible_service.get_bible_by_novel(request.novel_id)
+        if not bible:
+            raise HTTPException(status_code=404, detail="Bible not found")
+        ch = next((c for c in bible.characters if c.id == request.character_id), None)
+        if not ch:
             raise HTTPException(status_code=404, detail=f"Character {request.character_id} not found")
 
-        character_name = character.get("name", request.character_id)
+        character_name = ch.name
 
-        # 构建 prompt
-        mental_state = request.mental_state or "平静"
-        verbal_tic = request.verbal_tic or ""
+        mental_state = (
+            request.mental_state
+            if request.mental_state is not None
+            else (getattr(ch, "mental_state", None) or "NORMAL")
+        )
+        verbal_tic = (
+            request.verbal_tic if request.verbal_tic is not None else (getattr(ch, "verbal_tic", None) or "")
+        )
+        idle_behavior = (
+            request.idle_behavior
+            if request.idle_behavior is not None
+            else (getattr(ch, "idle_behavior", None) or "")
+        )
 
         prompt = f"""你是一位专业的对话编剧。请根据以下信息生成一段对话：
 
 角色：{character_name}
 心理状态：{mental_state}
 口头禅：{verbal_tic}
+待机动作/小动作：{idle_behavior}
 场景：{request.scene_prompt}
 
 要求：
 1. 对话要符合角色的心理状态和性格特征
 2. 自然融入口头禅（如果有）
-3. 对话长度控制在 2-4 句话
-4. 只返回对话内容，不要加任何说明
+3. 必要时可描写待机动作/肢体语言（若有）
+4. 对话长度控制在 2-4 句话
+5. 只返回对话内容，不要加任何说明
 
 对话："""
 

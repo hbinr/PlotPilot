@@ -33,6 +33,7 @@ export interface GenerateDialogueRequest {
   scene_prompt: string
   mental_state?: string
   verbal_tic?: string
+  idle_behavior?: string
 }
 
 export interface GenerateDialogueResponse {
@@ -56,6 +57,18 @@ export const sandboxApi = {
   /** GET /api/v1/novels/{novel_id}/sandbox/character/{character_id}/anchor */
   getCharacterAnchor(novelId: string, characterId: string): Promise<CharacterAnchor> {
     return apiClient.get(`/novels/${novelId}/sandbox/character/${characterId}/anchor`) as unknown as Promise<CharacterAnchor>
+  },
+
+  /** PATCH /api/v1/novels/{novel_id}/sandbox/character/{character_id}/anchor */
+  patchCharacterAnchor(
+    novelId: string,
+    characterId: string,
+    body: { mental_state: string; verbal_tic: string; idle_behavior: string }
+  ): Promise<CharacterAnchor> {
+    return apiClient.patch(
+      `/novels/${novelId}/sandbox/character/${characterId}/anchor`,
+      body
+    ) as unknown as Promise<CharacterAnchor>
   },
 
   /** POST /api/v1/novels/sandbox/generate-dialogue */

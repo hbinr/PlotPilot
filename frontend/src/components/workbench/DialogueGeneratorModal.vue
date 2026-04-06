@@ -158,7 +158,8 @@ async function generateDialogue() {
       character_id: selectedCharacterId.value,
       scene_prompt: scenePrompt.value,
       mental_state: characterAnchor.value?.mental_state,
-      verbal_tic: characterAnchor.value?.verbal_tic
+      verbal_tic: characterAnchor.value?.verbal_tic,
+      idle_behavior: characterAnchor.value?.idle_behavior,
     })
 
     generatedDialogue.value = result.dialogue

@@ -2,7 +2,7 @@
   <div class="sandbox-panel">
     <n-space vertical :size="12">
       <n-alert type="info" :show-icon="true" style="font-size: 12px">
-        <strong>写</strong>：挂起或审计时可改锚点字段；<strong>读</strong>：生成正文节拍时作为高优先级 System 提示注入声线与小动作。
+        <strong>写</strong>：编辑后点「保存到 Bible」写入数据库；<strong>读</strong>：托管/单章生成时节拍与 System 提示会注入本书角色的声线与小动作锚点。
       </n-alert>
 
       <!-- 角色锚点 + 试生成 -->
@@ -50,15 +50,26 @@
                 :autosize="{ minRows: 2, maxRows: 5 }"
               />
             </n-form-item>
-            <n-button
-              type="primary"
-              size="small"
-              :loading="genLoading"
-              :disabled="!scenePrompt.trim()"
-              @click="runGenerate"
-            >
-              生成对话
-            </n-button>
+            <n-space :size="8" wrap>
+              <n-button
+                size="small"
+                secondary
+                :loading="saveLoading"
+                :disabled="!selectedCharacterId"
+                @click="saveAnchors"
+              >
+                保存到 Bible
+              </n-button>
+              <n-button
+                type="primary"
+                size="small"
+                :loading="genLoading"
+                :disabled="!scenePrompt.trim()"
+                @click="runGenerate"
+              >
+                生成对话
+              </n-button>
+            </n-space>
             <n-card v-if="generatedLine" size="small" :bordered="true" title="输出">
               <n-text style="font-size: 13px; line-height: 1.6">{{ generatedLine }}</n-text>
             </n-card>
@@ -171,6 +182,7 @@ const selectedCharacterId = ref<string | null>(null)
 const anchor = ref<CharacterAnchor | null>(null)
 const anchorLoading = ref(false)
 const genLoading = ref(false)
+const saveLoading = ref(false)
 const editMental = ref('')
 const editVerbal = ref('')
 const editIdle = ref('')
@@ -208,6 +220,25 @@ async function loadAnchor() {
   }
 }
 
+async function saveAnchors() {
+  const id = selectedCharacterId.value
+  if (!id) return
+  saveLoading.value = true
+  try {
+    await sandboxApi.patchCharacterAnchor(props.slug, id, {
+      mental_state: editMental.value || 'NORMAL',
+      verbal_tic: editVerbal.value || '',
+      idle_behavior: editIdle.value || '',
+    })
+    message.success('已保存到 Bible')
+    refreshStore.bumpDesk()
+  } catch {
+    message.error('保存失败')
+  } finally {
+    saveLoading.value = false
+  }
+}
+
 async function runGenerate() {
   const id = selectedCharacterId.value
   if (!id || !scenePrompt.value.trim()) return
@@ -220,6 +251,7 @@ async function runGenerate() {
       scene_prompt: scenePrompt.value.trim(),
       mental_state: editMental.value || undefined,
       verbal_tic: editVerbal.value || undefined,
+      idle_behavior: editIdle.value || undefined,
     })
     generatedLine.value = res.dialogue
   } catch {
