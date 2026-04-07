@@ -123,3 +123,41 @@ class ForeshadowingRegistry(BaseEntity):
             if e.status == "pending"
         ]
 
+    def get_overdue_foreshadowings(self, current_chapter: int) -> List[Foreshadowing]:
+        """获取已过期的伏笔（预期回收章节已过但尚未回收）"""
+        return [
+            f for f in self._foreshadowings
+            if f.status == ForeshadowingStatus.PLANTED
+            and f.suggested_resolve_chapter is not None
+            and f.suggested_resolve_chapter < current_chapter
+        ]
+
+    def get_upcoming_foreshadowings(self, current_chapter: int, window: int = 3) -> List[Foreshadowing]:
+        """获取即将到期的伏笔（在指定窗口内预期回收）"""
+        return [
+            f for f in self._foreshadowings
+            if f.status == ForeshadowingStatus.PLANTED
+            and f.suggested_resolve_chapter is not None
+            and current_chapter <= f.suggested_resolve_chapter <= current_chapter + window
+        ]
+
+    def get_overdue_subtext_entries(self, current_chapter: int) -> List[SubtextLedgerEntry]:
+        """获取已过期的潜台词条目"""
+        return [
+            e for e in self._subtext_entries
+            if e.status == "pending"
+            and hasattr(e, 'suggested_resolve_chapter')
+            and e.suggested_resolve_chapter is not None
+            and e.suggested_resolve_chapter < current_chapter
+        ]
+
+    def get_upcoming_subtext_entries(self, current_chapter: int, window: int = 3) -> List[SubtextLedgerEntry]:
+        """获取即将到期的潜台词条目"""
+        return [
+            e for e in self._subtext_entries
+            if e.status == "pending"
+            and hasattr(e, 'suggested_resolve_chapter')
+            and e.suggested_resolve_chapter is not None
+            and current_chapter <= e.suggested_resolve_chapter <= current_chapter + window
+        ]
+
