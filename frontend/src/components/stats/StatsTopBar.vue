@@ -6,6 +6,9 @@
     <span>{{ error }}</span>
   </div>
   <div v-else class="stats-top-bar">
+    <div class="topbar-center">
+      <GlobalLLMEntryButton appearance="topbar" />
+    </div>
     <div
       v-for="stat in stats"
       :key="stat.key"
@@ -23,6 +26,12 @@
         <span>{{ stat.tooltip }}</span>
       </n-tooltip>
     </div>
+
+    <div class="settings-trigger" @click="$emit('open-settings')" role="button" aria-label="LLM 设置">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20">
+        <path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/>
+      </svg>
+    </div>
   </div>
 </template>
 
@@ -30,9 +39,14 @@
 import { computed, onMounted, ref } from 'vue'
 import { NTooltip, NSpin } from 'naive-ui'
 import { useStatsStore } from '@/stores/statsStore'
+import GlobalLLMEntryButton from '@/components/global/GlobalLLMEntryButton.vue'
 
 const props = defineProps<{
   slug: string
+}>()
+
+defineEmits<{
+  'open-settings': []
 }>()
 
 const statsStore = useStatsStore()
@@ -158,6 +172,16 @@ onMounted(async () => {
   justify-content: space-around;
   padding: 0 24px;
   color: white;
+  position: relative;
+}
+
+.topbar-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  pointer-events: auto;
 }
 
 .stats-top-bar.loading,
@@ -195,6 +219,24 @@ onMounted(async () => {
 .stat-item:hover .stat-value {
   transform: scale(1.05);
   transition: transform 0.2s;
+}
+
+.settings-trigger {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+  border-radius: 8px;
+}
+
+.settings-trigger:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.15);
 }
 
 /* Accessibility: Focus styles */
