@@ -39,7 +39,7 @@
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/shenminglinyi/PlotPilot.git
+git clone git@github.com:hbinr/PlotPilot.git
 cd PlotPilot
 ```
 
