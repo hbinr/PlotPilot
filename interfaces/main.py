@@ -44,7 +44,7 @@ import threading
 import multiprocessing
 
 # Core module
-from interfaces.api.v1.core import novels, chapters, scene_generation_routes, settings as llm_settings
+from interfaces.api.v1.core import novels, chapters, scene_generation_routes, settings as llm_settings, export
 
 # World module
 from interfaces.api.v1.world import bible, cast, knowledge, knowledge_graph_routes, worldbuilding_routes
@@ -75,7 +75,6 @@ from interfaces.api.stats.routers.stats import create_stats_router
 from interfaces.api.stats.services.stats_service import StatsService
 from interfaces.api.stats.repositories.sqlite_stats_repository_adapter import SqliteStatsRepositoryAdapter
 from infrastructure.persistence.database.connection import get_database
-from application.paths import DATA_DIR
 
 # 后端版本号（每次重启递增）
 BACKEND_VERSION = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -129,13 +128,6 @@ async def startup_event():
     logger.info("📦 Loading modules and routes...")
     logger.info("✅ FastAPI application started successfully")
     logger.info(f"📊 Registered {len(app.routes)} routes")
-    
-    # 从 JSON 文件恢复上次激活的 LLM 配置
-    try:
-        from application.settings.llm_config_manager import LLMConfigManager
-        LLMConfigManager(DATA_DIR / "llm_configs.json").apply_active_on_startup()
-    except Exception as exc:
-        logger.warning("LLM config restore skipped: %s", exc)
 
     # 重启时将所有运行中的小说设置为停止状态
     _stop_all_running_novels()
@@ -361,6 +353,7 @@ app.include_router(chapters.router, prefix="/api/v1/novels")
 app.include_router(scene_generation_routes.router)
 app.include_router(llm_settings.router, prefix="/api/v1")
 app.include_router(llm_settings.embedding_router, prefix="/api/v1")
+app.include_router(export.router, prefix="/api/v1")
 
 # World module routes
 app.include_router(bible.router, prefix="/api/v1")
