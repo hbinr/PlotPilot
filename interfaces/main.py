@@ -44,7 +44,7 @@ import threading
 import multiprocessing
 
 # Core module
-from interfaces.api.v1.core import novels, chapters, scene_generation_routes
+from interfaces.api.v1.core import novels, chapters, scene_generation_routes, settings as llm_settings, export
 
 # World module
 from interfaces.api.v1.world import bible, cast, knowledge, knowledge_graph_routes, worldbuilding_routes
@@ -70,12 +70,11 @@ from interfaces.api.v1.audit import chapter_review_routes, macro_refactor, chapt
 from interfaces.api.v1.analyst import voice, narrative_state, foreshadow_ledger
 
 # Workbench module
-from interfaces.api.v1.workbench import sandbox, writer_block, monitor
+from interfaces.api.v1.workbench import sandbox, writer_block, monitor, llm_control
 from interfaces.api.stats.routers.stats import create_stats_router
 from interfaces.api.stats.services.stats_service import StatsService
 from interfaces.api.stats.repositories.sqlite_stats_repository_adapter import SqliteStatsRepositoryAdapter
 from infrastructure.persistence.database.connection import get_database
-from application.paths import DATA_DIR
 
 # 后端版本号（每次重启递增）
 BACKEND_VERSION = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -97,13 +96,39 @@ app = FastAPI(
     description="AI 小说创作平台 API"
 )
 
+# 修复反向代理场景下 trailing slash 重定向使用后端本地地址的 bug
+# 当 FastAPI 的 trailing slash 重定向指向 127.0.0.1 时，
+# 从 X-Forwarded-Host / Host / Referer 获取真实地址并改写 Location header
+@app.middleware("http")
+async def fix_redirect_host(request, call_next):
+    response = await call_next(request)
+    if response.status_code in (301, 307, 308):
+        location = response.headers.get("location", "")
+        if location and ("127.0.0.1" in location or "localhost" in location):
+            from urllib.parse import urlparse, urlunparse
+            parsed = urlparse(location)
+            original_host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
+            if not original_host or "127.0.0.1" in original_host or "localhost" in original_host:
+                referer = request.headers.get("referer", "")
+                if referer:
+                    from urllib.parse import urlparse as _urlparse
+                    ref_host = _urlparse(referer).netloc
+                    if ref_host and "127.0.0.1" not in ref_host and "localhost" not in ref_host:
+                        original_host = ref_host
+            if original_host and "127.0.0.1" not in original_host and "localhost" not in original_host:
+                scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+                new_location = urlunparse((scheme, original_host, parsed.path, parsed.params, parsed.query, parsed.fragment))
+                response.headers["location"] = new_location
+    return response
+
+
 @app.on_event("startup")
 async def startup_event():
     """应用启动事件"""
     logger.info("📦 Loading modules and routes...")
     logger.info("✅ FastAPI application started successfully")
     logger.info(f"📊 Registered {len(app.routes)} routes")
-    
+
     # 重启时将所有运行中的小说设置为停止状态
     _stop_all_running_novels()
     
@@ -125,6 +150,20 @@ async def shutdown_event():
 # 守护进程进程管理（使用独立进程避免阻塞主事件循环）
 _daemon_process = None
 _daemon_stop_event = None
+
+
+def _is_expected_daemon_shutdown_exception(exc: BaseException) -> bool:
+    """热重载/停止时的中断视为正常退出，避免子进程打印长栈。"""
+    import asyncio
+
+    current = exc
+    visited = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        if isinstance(current, (KeyboardInterrupt, asyncio.CancelledError)):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def _stop_all_running_novels():
@@ -211,12 +250,18 @@ def _run_daemon_in_process(
                 # 轮询间隔（使用 wait 而非 sleep，以便快速响应停止信号）
                 stop_event.wait(timeout=daemon.poll_interval)
                 
-            except Exception as e:
+            except BaseException as e:
+                if stop_event.is_set() or _is_expected_daemon_shutdown_exception(e):
+                    logger.info("ℹ️ 守护进程在停止/热重载期间中断，正常退出")
+                    break
                 logger.error(f"❌ 守护进程异常: {e}", exc_info=True)
                 stop_event.wait(timeout=10)  # 异常后等待10秒
                 
-    except Exception as e:
-        logger.error(f"❌ 守护进程初始化失败: {e}", exc_info=True)
+    except BaseException as e:
+        if stop_event.is_set() or _is_expected_daemon_shutdown_exception(e):
+            logger.info("ℹ️ 守护进程收到停止信号，正常退出")
+        else:
+            logger.error(f"❌ 守护进程初始化失败: {e}", exc_info=True)
     finally:
         logger.info("🛑 守护进程已停止")
 
@@ -256,11 +301,11 @@ def _start_autopilot_daemon_thread():
 def _stop_autopilot_daemon_thread():
     """停止守护进程"""
     global _daemon_process, _daemon_stop_event
-    
+
     if _daemon_stop_event:
         logger.info("🛑 正在停止守护进程...")
         _daemon_stop_event.set()
-        
+
     if _daemon_process and _daemon_process.is_alive():
         _daemon_process.join(timeout=5)  # 等待最多5秒
         if _daemon_process.is_alive():
@@ -269,9 +314,16 @@ def _stop_autopilot_daemon_thread():
             _daemon_process.join(timeout=2)
         else:
             logger.info("✅ 守护进程已成功停止")
-    
+
     _daemon_process = None
     _daemon_stop_event = None
+
+
+def restart_autopilot_daemon():
+    """重启守护进程以拾取新的 LLM / 嵌入配置（跨进程 env 不可共享，必须重启）。"""
+    _stop_autopilot_daemon_thread()
+    _start_autopilot_daemon_thread()
+    logger.info("🔄 守护进程已因配置变更重启")
 
 
 # 配置 CORS
@@ -299,6 +351,9 @@ app.add_middleware(
 app.include_router(novels.router, prefix="/api/v1")
 app.include_router(chapters.router, prefix="/api/v1/novels")
 app.include_router(scene_generation_routes.router)
+app.include_router(llm_settings.router, prefix="/api/v1")
+app.include_router(llm_settings.embedding_router, prefix="/api/v1")
+app.include_router(export.router, prefix="/api/v1")
 
 # World module routes
 app.include_router(bible.router, prefix="/api/v1")
@@ -335,6 +390,7 @@ app.include_router(foreshadow_ledger.router, prefix="/api/v1")
 app.include_router(writer_block.router, prefix="/api/v1")
 app.include_router(sandbox.router, prefix="/api/v1")
 app.include_router(monitor.router, prefix="/api/v1")
+app.include_router(llm_control.router, prefix="/api/v1")
 
 # 注册统计路由（使用 SQLite 适配器）
 stats_repository = SqliteStatsRepositoryAdapter(get_database())

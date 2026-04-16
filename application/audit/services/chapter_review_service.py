@@ -9,10 +9,11 @@
 - 改进建议生成
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from datetime import datetime
 import json
 import logging
+import os
 
 from domain.novel.entities.chapter import Chapter
 from domain.novel.repositories.chapter_repository import ChapterRepository
@@ -20,10 +21,12 @@ from domain.cast.repositories.cast_repository import CastRepository
 from domain.novel.repositories.timeline_repository import TimelineRepository
 from domain.novel.repositories.storyline_repository import StorylineRepository
 from domain.novel.repositories.foreshadowing_repository import ForeshadowingRepository
-from infrastructure.ai.chromadb_vector_store import ChromaDBVectorStore
 from application.ai.llm_json_extract import parse_llm_json_to_dict
 from domain.ai.services.llm_service import LLMService, GenerationConfig
 from domain.ai.value_objects.prompt import Prompt
+
+if TYPE_CHECKING:
+    from infrastructure.ai.chromadb_vector_store import ChromaDBVectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -95,9 +98,9 @@ class ChapterReviewService:
         timeline_repo: TimelineRepository,
         storyline_repo: StorylineRepository,
         foreshadowing_repo: ForeshadowingRepository,
-        vector_store: ChromaDBVectorStore,
+        vector_store: "ChromaDBVectorStore",
         llm_service: LLMService,
-        model: str = "claude-3-5-haiku-20241022"
+        model: str = ""
     ):
         self.chapter_repo = chapter_repo
         self.cast_repo = cast_repo
@@ -106,7 +109,7 @@ class ChapterReviewService:
         self.foreshadowing_repo = foreshadowing_repo
         self.vector_store = vector_store
         self.llm_service = llm_service
-        self.model = model
+        self.model = model or os.getenv("SYSTEM_MODEL", "")
 
     async def review_chapter(self, novel_id: str, chapter_number: int) -> ChapterReviewResult:
         """审稿章节"""

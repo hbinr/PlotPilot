@@ -109,9 +109,8 @@ class ContextBudgetAllocator:
     # 获取组装好的上下文
     context = allocation.get_final_context()
     
-    # 查看分配详情
-    print(f"T0 保留: {allocation.t0_reserved} tokens")
-    print(f"压缩情况: {allocation.compression_log}")
+    # 查看分配详情（通过 logger 或返回值获取）
+    # allocation.t0_reserved, allocation.compression_log
     ```
     """
     
@@ -140,6 +139,7 @@ class ContextBudgetAllocator:
         bible_repository: Optional[BibleRepository] = None,
         story_node_repository: Optional[StoryNodeRepository] = None,
         chapter_element_repository = None,
+        triple_repository = None,
         vector_store: Optional[VectorStore] = None,
         embedding_service: Optional[EmbeddingService] = None,
     ):
@@ -148,6 +148,7 @@ class ContextBudgetAllocator:
         self.bible_repo = bible_repository
         self.story_node_repo = story_node_repository
         self.chapter_element_repo = chapter_element_repository
+        self.triple_repo = triple_repository
         
         # 向量检索门面
         self.vector_facade = None

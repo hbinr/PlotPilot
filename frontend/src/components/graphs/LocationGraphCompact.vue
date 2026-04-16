@@ -24,7 +24,7 @@ import { useRouter } from 'vue-router'
 import { knowledgeApi } from '../../api/knowledge'
 import GraphChart from '../charts/GraphChart.vue'
 import { convertGraph, type VisNode, type VisEdge } from '../../utils/visToEcharts'
-import type { EChartsNode, EChartsLink } from '../../utils/visToEcharts'
+import type { EChartsNode } from '../../utils/visToEcharts'
 import {
   tripleStringAttrs,
   locationImportanceZh,
@@ -39,7 +39,7 @@ interface KnowledgeTriple {
   subject: string
   predicate: string
   object: string
-  chapter_id?: number
+  chapter_id?: number | null
   note?: string
   entity_type?: string
   importance?: string
@@ -249,7 +249,7 @@ onMounted(async () => {
   gap: 8px;
   padding: 8px 10px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.2);
-  background: #fff;
+  background: var(--app-surface);
 }
 
 .lgc-hint {
