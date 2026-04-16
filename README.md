@@ -75,9 +75,11 @@ docker compose up -d
 # Qdrant 将运行在 http://localhost:6333
 ```
 
-### 4. 下载嵌入模型
+### 4. 配置 Embedding（云端 / 本地二选一）
 
-首次运行需下载本地嵌入模型（约 100 MB）：
+默认支持 **云端 Embedding（推荐）**：在 `.env` 中配置 `EMBEDDING_SERVICE=openai` 以及 `EMBEDDING_API_KEY`（或复用 `OPENAI_API_KEY`），并可通过 `EMBEDDING_BASE_URL` 接入任意 OpenAI 兼容的云端 Embedding 服务。
+
+如果使用 **本地 Embedding**（`EMBEDDING_SERVICE=local`），首次运行需下载本地嵌入模型（约 100 MB）：
 
 ```bash
 python scripts/utils/download_embedding_model.py
@@ -116,6 +118,16 @@ npm run dev
 | `DISABLE_AUTO_DAEMON` | 否 | 设为 `1` 禁止自动驾驶守护进程在启动时自动运行 |
 | `LOG_LEVEL` | 否 | 日志级别，默认 `INFO` |
 | `LOG_FILE` | 否 | 日志文件路径，默认 `logs/aitext.log` |
+| `EMBEDDING_SERVICE` | 否 | `openai`（云端，默认有 key 时启用）或 `local`（本地模型） |
+| `EMBEDDING_API_KEY` | 否 | 云端 Embedding API Key（也可复用 `OPENAI_API_KEY`） |
+| `EMBEDDING_BASE_URL` | 否 | 云端 Embedding Base URL（用于接入 OpenAI 兼容服务） |
+| `EMBEDDING_MODEL` | 否 | Embedding 模型名（默认 `text-embedding-3-small`） |
+| `EMBEDDING_DIMENSION` | 否 | Embedding 维度（不填则按常见模型推断；不确定时可手动指定） |
+| `VECTOR_STORE_TYPE` | 否 | `chromadb` 或 `qdrant` |
+| `QDRANT_URL` | 否 | Qdrant 完整 URL（优先于 host/port，可为 https） |
+| `QDRANT_HOST` | 否 | Qdrant 主机（默认 `localhost`） |
+| `QDRANT_PORT` | 否 | Qdrant 端口（默认 `6333`） |
+| `QDRANT_API_KEY` | 否 | Qdrant API Key（可选） |
 
 ## 系统架构
 

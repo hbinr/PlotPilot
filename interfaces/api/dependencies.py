@@ -415,48 +415,66 @@ def get_consistency_checker() -> ConsistencyChecker:
 
 
 def get_embedding_service():
-    """获取 Embedding 服务（优先从数据库读取配置，环境变量作为 fallback）。
+    """获取 Embedding 服务（环境变量优先，数据库作为 fallback）。
 
     配置优先级：
-    1. 数据库 embedding_config 表中的 mode / api_key / base_url / model / model_path / use_gpu
-    2. 环境变量 EMBEDDING_SERVICE / EMBEDDING_MODEL_PATH 等
-    3. 默认值：本地 BAAI/bge-small-zh-v1.5
+    1. 环境变量（显式配置时生效）：EMBEDDING_SERVICE / EMBEDDING_API_KEY / EMBEDDING_BASE_URL / EMBEDDING_MODEL / EMBEDDING_DIMENSION / EMBEDDING_MODEL_PATH / EMBEDDING_USE_GPU
+    2. 数据库 embedding_config 表中的 mode / api_key / base_url / model / model_path / use_gpu
+    3. 默认值：若存在 API Key 则使用 openai，否则 local
 
     如果 VECTOR_STORE_ENABLED=false，返回 None。
     """
     if os.getenv("VECTOR_STORE_ENABLED", "true").lower() != "true":
         return None
 
-    # 尝试从数据库读取配置
-    _mode = "local"
-    _api_key = ""
-    _base_url = ""
-    _model = "text-embedding-3-small"
-    _model_path = "BAAI/bge-small-zh-v1.5"
-    _use_gpu = True
-
-    try:
-        from application.ai.embedding_config_service import get_embedding_config_service
-        cfg_svc = get_embedding_config_service()
-        cfg = cfg_svc.get_config()
-        _mode = cfg.mode
-        _api_key = cfg.api_key
-        _base_url = cfg.base_url
-        _model = cfg.model or "text-embedding-3-small"
-        _model_path = cfg.model_path or "BAAI/bge-small-zh-v1.5"
-        _use_gpu = cfg.use_gpu
-        logger.info(
-            "Embedding 配置来源: 数据库 | mode=%s, model=%s, path=%s",
-            _mode, _model, _model_path,
-        )
-    except Exception as exc:
-        # 数据库不可用时回退到环境变量
-        _mode = os.getenv("EMBEDDING_SERVICE", "local").lower()
+    _env_keys = (
+        "EMBEDDING_SERVICE",
+        "EMBEDDING_API_KEY",
+        "EMBEDDING_BASE_URL",
+        "EMBEDDING_MODEL",
+        "EMBEDDING_DIMENSION",
+        "EMBEDDING_MODEL_PATH",
+        "EMBEDDING_USE_GPU",
+    )
+    _use_env = any(os.getenv(k) for k in _env_keys)
+    if _use_env:
+        _mode_raw = os.getenv("EMBEDDING_SERVICE")
+        if _mode_raw and _mode_raw.strip():
+            _mode = _mode_raw.strip().lower()
+        else:
+            _mode = "openai" if (os.getenv("EMBEDDING_API_KEY") or os.getenv("OPENAI_API_KEY")) else "local"
         _api_key = os.getenv("EMBEDDING_API_KEY") or ""
         _base_url = os.getenv("EMBEDDING_BASE_URL") or ""
-        _model_path = os.getenv("EMBEDDING_MODEL_PATH", "BAAI/bge-small-zh-v1.5")
+        _model = os.getenv("EMBEDDING_MODEL") or "text-embedding-3-small"
+        _model_path = os.getenv("EMBEDDING_MODEL_PATH", "./.models/bge-small-zh-v1.5")
         _use_gpu = os.getenv("EMBEDDING_USE_GPU", "true").lower() == "true"
-        logger.warning("读取嵌入配置失败，回退到环境变量: %s", exc)
+        logger.info(
+            "Embedding 配置来源: 环境变量 | mode=%s, model=%s, path=%s",
+            _mode, _model, _model_path,
+        )
+    else:
+        _mode = "openai" if (os.getenv("EMBEDDING_API_KEY") or os.getenv("OPENAI_API_KEY")) else "local"
+        _api_key = ""
+        _base_url = ""
+        _model = "text-embedding-3-small"
+        _model_path = "./.models/bge-small-zh-v1.5"
+        _use_gpu = True
+        try:
+            from application.ai.embedding_config_service import get_embedding_config_service
+            cfg_svc = get_embedding_config_service()
+            cfg = cfg_svc.get_config()
+            _mode = (cfg.mode or _mode).lower()
+            _api_key = cfg.api_key
+            _base_url = cfg.base_url
+            _model = cfg.model or _model
+            _model_path = cfg.model_path or _model_path
+            _use_gpu = cfg.use_gpu
+            logger.info(
+                "Embedding 配置来源: 数据库 | mode=%s, model=%s, path=%s",
+                _mode, _model, _model_path,
+            )
+        except Exception as exc:
+            logger.warning("读取嵌入配置失败，回退到默认/环境检测: %s", exc)
 
     try:
         if _mode == "openai":
@@ -476,6 +494,20 @@ def get_embedding_service():
             from infrastructure.ai.local_embedding_service import LocalEmbeddingService
             logger.info("使用本地嵌入服务 (DB配置): path=%s, gpu=%s", _model_path, _use_gpu)
             return LocalEmbeddingService(model_name=_model_path, use_gpu=_use_gpu)
+    except FileNotFoundError as e:
+        key = os.getenv("EMBEDDING_API_KEY") or os.getenv("OPENAI_API_KEY") or ""
+        if key:
+            from infrastructure.ai.openai_embedding_service import OpenAIEmbeddingService
+            base_url = os.getenv("EMBEDDING_BASE_URL") or os.getenv("OPENAI_BASE_URL") or None
+            model = os.getenv("EMBEDDING_MODEL") or os.getenv("OPENAI_EMBEDDING_MODEL") or "text-embedding-3-small"
+            logger.warning("本地 Embedding 模型缺失，自动切换到云端 embedding: %s", e)
+            return OpenAIEmbeddingService(
+                api_key=key,
+                base_url=base_url,
+                model=model,
+            )
+        logger.warning("EmbeddingService 初始化失败: %s", e)
+        return None
     except Exception as e:
         logger.warning("EmbeddingService 初始化失败: %s", e)
         return None
@@ -545,10 +577,11 @@ def get_vector_store() -> Optional[VectorStore]:
             _vector_store_singleton = ChromaDBVectorStore(persist_directory=persist_dir)
         elif store_type == "qdrant":
             from infrastructure.ai.qdrant_vector_store import QdrantVectorStore
+            url = os.getenv("QDRANT_URL")
             host = os.getenv("QDRANT_HOST", "localhost")
             port = int(os.getenv("QDRANT_PORT", "6333"))
             api_key = os.getenv("QDRANT_API_KEY")
-            _vector_store_singleton = QdrantVectorStore(host=host, port=port, api_key=api_key)
+            _vector_store_singleton = QdrantVectorStore(host=host, port=port, api_key=api_key, url=url)
         else:
             logger.warning(f"Unknown VECTOR_STORE_TYPE: {store_type}, vector store disabled")
             return None
@@ -957,4 +990,3 @@ def get_foreshadow_ledger_service():
     """
     from application.analyst.services.foreshadow_ledger_service import ForeshadowLedgerService
     return ForeshadowLedgerService(get_foreshadowing_repository())
-

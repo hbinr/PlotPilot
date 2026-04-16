@@ -5,6 +5,19 @@ from openai import AsyncOpenAI
 from domain.ai.services.embedding_service import EmbeddingService
 
 
+def _known_embedding_dimension(model: str) -> int:
+    m = (model or "").strip()
+    if not m:
+        return 0
+    if m == "text-embedding-3-small":
+        return 1536
+    if m == "text-embedding-3-large":
+        return 3072
+    if m == "text-embedding-ada-002":
+        return 1536
+    return 0
+
+
 class OpenAIEmbeddingService(EmbeddingService):
     """OpenAI 嵌入服务实现
 
@@ -17,6 +30,7 @@ class OpenAIEmbeddingService(EmbeddingService):
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         model: Optional[str] = None,
+        dimension: Optional[int] = None,
     ):
         """初始化 OpenAI 嵌入服务
 
@@ -30,12 +44,27 @@ class OpenAIEmbeddingService(EmbeddingService):
         """
         _api_key = api_key or os.getenv("EMBEDDING_API_KEY") or os.getenv("OPENAI_API_KEY")
         if not _api_key:
-            raise ValueError("EMBEDDING_API_KEY or OPENAI_API_KEY environment variable is required")
+            raise ValueError("OPENAI_API_KEY environment variable is required")
 
-        _base_url = base_url or os.getenv("EMBEDDING_BASE_URL") or None
+        _base_url = (
+            base_url
+            or os.getenv("EMBEDDING_BASE_URL")
+            or os.getenv("OPENAI_BASE_URL")
+            or None
+        )
         self.client = AsyncOpenAI(api_key=_api_key, base_url=_base_url)
-        self.model = model or os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-        self._dimension: int = 0
+        self.model = (
+            model
+            or os.getenv("EMBEDDING_MODEL")
+            or os.getenv("OPENAI_EMBEDDING_MODEL")
+            or "text-embedding-3-small"
+        )
+        _env_dim = os.getenv("EMBEDDING_DIMENSION")
+        self._dimension: int = (
+            int(_env_dim) if _env_dim and _env_dim.isdigit()
+            else int(dimension) if dimension is not None
+            else _known_embedding_dimension(self.model)
+        )
 
     @classmethod
     def from_config(cls, config: dict) -> "OpenAIEmbeddingService":
@@ -51,6 +80,7 @@ class OpenAIEmbeddingService(EmbeddingService):
             api_key=config.get("api_key", ""),
             base_url=config.get("base_url") or None,
             model=config.get("model"),
+            dimension=config.get("dimension"),
         )
 
     def get_dimension(self) -> int:

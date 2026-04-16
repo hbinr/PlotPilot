@@ -1,5 +1,5 @@
 # infrastructure/ai/qdrant_vector_store.py
-from typing import List
+from typing import List, Optional
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 from domain.ai.services.vector_store import VectorStore
@@ -8,7 +8,13 @@ from domain.ai.services.vector_store import VectorStore
 class QdrantVectorStore(VectorStore):
     """Qdrant 向量存储实现"""
 
-    def __init__(self, host: str = "localhost", port: int = 6333, api_key: str = None):
+    def __init__(
+        self,
+        host: str = "localhost",
+        port: int = 6333,
+        api_key: Optional[str] = None,
+        url: Optional[str] = None,
+    ):
         """
         初始化 Qdrant 客户端
 
@@ -16,8 +22,12 @@ class QdrantVectorStore(VectorStore):
             host: Qdrant 服务器地址
             port: Qdrant 服务器端口
             api_key: Qdrant API 密钥（可选）
+            url: 完整 URL（可选，优先于 host/port，支持 https）
         """
-        self.client = QdrantClient(host=host, port=port, api_key=api_key)
+        if url and url.strip():
+            self.client = QdrantClient(url=url.strip(), api_key=api_key)
+        else:
+            self.client = QdrantClient(host=host, port=port, api_key=api_key)
 
     async def insert(
         self,
