@@ -304,13 +304,38 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
-  color: var(--app-text-inverse);
+  color: var(--nav-hero-text, #ffffff);
   position: relative;
   gap: 16px;
   border-bottom: 1px solid var(--app-border, rgba(255, 255, 255, 0.08));
   box-shadow:
     var(--app-shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.08)),
     0 4px 16px var(--color-brand-border, rgba(79, 70, 229, 0.08));
+}
+
+/* 左侧：AI 控制台入口 */
+.topbar-left {
+  flex-shrink: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* 覆盖 topbar 模式下的按钮尺寸以适应导航栏 */
+.topbar-left :deep(.global-llm-main.variant-topbar) {
+  width: auto;
+  min-height: 46px;
+  padding: 8px 14px;
+  border-radius: var(--app-radius-lg);
+}
+
+.topbar-left :deep(.plaza-main.variant-topbar) {
+  width: auto;
+  min-height: 46px;
+  padding: 8px 14px;
+  border-radius: var(--app-radius-lg);
 }
 
 /* 中间：统计数据 */
@@ -344,7 +369,7 @@ onMounted(async () => {
 }
 
 .stat-item:hover {
-  background: var(--app-text-inverse, rgba(255, 255, 255, 0.1));
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .stat-content {
@@ -356,11 +381,11 @@ onMounted(async () => {
 
 .stat-label {
   font-size: 11.5px;
-  opacity: 0.8;
+  opacity: 0.92;
   font-weight: 600;
   letter-spacing: 0.03em;
   white-space: nowrap;
-  color: inherit;
+  color: var(--nav-hero-text-muted, rgba(255, 255, 255, 0.86));
 }
 
 .stat-value {
@@ -368,8 +393,8 @@ onMounted(async () => {
   font-weight: 800;
   letter-spacing: -0.02em;
   line-height: 1.2;
-  color: inherit;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  color: var(--nav-hero-text, #ffffff);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 
 .stat-item:hover .stat-value {
@@ -405,7 +430,7 @@ onMounted(async () => {
 
 .action-trigger:hover {
   opacity: 1;
-  background: var(--app-text-inverse, rgba(255, 255, 255, 0.15));
+  background: rgba(255, 255, 255, 0.16);
   transform: rotate(45deg);
 }
 
@@ -426,7 +451,7 @@ onMounted(async () => {
 
 .settings-trigger:hover {
   opacity: 1;
-  background: var(--app-text-inverse, rgba(255, 255, 255, 0.15));
+  background: rgba(255, 255, 255, 0.16);
   transform: rotate(45deg);
 }
 
@@ -437,13 +462,13 @@ onMounted(async () => {
 
 /* Accessibility: Focus styles */
 .stat-item:focus-within {
-  outline: 2px solid var(--app-text-inverse, rgba(255, 255, 255, 0.5));
+  outline: 2px solid rgba(255, 255, 255, 0.55);
   outline-offset: 4px;
   border-radius: 4px;
 }
 
 .settings-trigger:focus-visible {
-  outline: 2px solid var(--app-text-inverse, rgba(255, 255, 255, 0.5));
+  outline: 2px solid rgba(255, 255, 255, 0.55);
   outline-offset: 2px;
 }
 

@@ -106,8 +106,6 @@
           </span>
           <span>刷新列表</span>
         </button>
-        <GlobalLLMEntryButton appearance="sidebar" />
-        <PromptPlazaEntryButton appearance="sidebar" />
       </div>
     </section>
 
