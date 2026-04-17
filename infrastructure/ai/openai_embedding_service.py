@@ -1,4 +1,5 @@
 """OpenAI 嵌入服务实现"""
+import os
 from typing import List, Optional
 from openai import AsyncOpenAI
 from domain.ai.services.embedding_service import EmbeddingService
@@ -50,7 +51,7 @@ class OpenAIEmbeddingService(EmbeddingService):
             or os.getenv("OPENAI_BASE_URL")
             or None
         )
-        self.client = AsyncOpenAI(api_key=_api_key, base_url=_base_url)
+        self.client = AsyncOpenAI(api_key=api_key, base_url=_base_url)
         self.model = (
             model
             or os.getenv("EMBEDDING_MODEL")
@@ -89,6 +90,26 @@ class OpenAIEmbeddingService(EmbeddingService):
             return
         response = await self.client.embeddings.create(model=self.model, input="dim_probe")
         self._dimension = len(response.data[0].embedding)
+
+    async def check_health(self) -> bool:
+        """异步检查服务健康状态，并记录日志。"""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"正在进行 Embedding Health Check: model={self.model} ...")
+        try:
+            response = await self.client.embeddings.create(
+                model=self.model,
+                input="health_check"
+            )
+            vec = response.data[0].embedding
+            dim = len(vec)
+            if self._dimension == 0:
+                self._dimension = dim
+            logger.info(f"✅ Embedding Health Check 通过！成功获取向量，维度={dim}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Embedding Health Check 失败: {str(e)}")
+            return False
 
     async def embed(self, text: str) -> List[float]:
         """生成单个文本的嵌入向量

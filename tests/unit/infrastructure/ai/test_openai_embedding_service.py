@@ -12,7 +12,7 @@ class TestOpenAIEmbeddingService:
     def service(self):
         """创建 service 实例"""
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-api-key"}):
-            service = OpenAIEmbeddingService()
+            service = OpenAIEmbeddingService(api_key="test-api-key")
             yield service
 
     def test_initialization(self, service):
@@ -108,8 +108,8 @@ class TestOpenAIEmbeddingService:
     def test_missing_api_key(self):
         """测试缺少 API key"""
         with patch.dict(os.environ, {}, clear=True):
-            with pytest.raises(ValueError, match="OPENAI_API_KEY environment variable is required"):
-                OpenAIEmbeddingService()
+            with pytest.raises(ValueError, match="api_key is required"):
+                OpenAIEmbeddingService(api_key="")
 
 
 @pytest.mark.skipif(
@@ -122,7 +122,8 @@ class TestOpenAIEmbeddingServiceIntegration:
     @pytest.fixture
     def service(self):
         """创建真实 service 实例"""
-        return OpenAIEmbeddingService()
+        api_key = os.getenv("OPENAI_API_KEY", "")
+        return OpenAIEmbeddingService(api_key=api_key)
 
     @pytest.mark.asyncio
     async def test_real_embed_single(self, service):

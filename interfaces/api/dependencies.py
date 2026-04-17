@@ -3,6 +3,7 @@
 提供 FastAPI 依赖注入函数，用于创建服务和仓储实例。
 """
 import logging
+import os
 from pathlib import Path
 from functools import lru_cache
 from typing import TYPE_CHECKING, Optional
@@ -430,13 +431,31 @@ def get_embedding_service():
             if not _api_key:
                 logger.warning("embedding mode=openai 但数据库中未配置 API Key，向量检索已禁用")
                 return None
+            
+            _clean_base_url = _base_url.strip(" ,") if _base_url else None
+            
             from infrastructure.ai.openai_embedding_service import OpenAIEmbeddingService
-            logger.info("使用 OpenAI 嵌入服务: base_url=%s, model=%s", _base_url, _model)
-            return OpenAIEmbeddingService(
+            logger.info("使用 OpenAI 嵌入服务: base_url=%s, model=%s", _clean_base_url, _model)
+            
+            # 初始化服务
+            svc = OpenAIEmbeddingService(
                 api_key=_api_key,
-                base_url=_base_url or None,
+                base_url=_clean_base_url,
                 model=_model,
             )
+            
+            # 在后台线程中触发健康检查日志，避免阻塞或因为没有事件循环而跳过
+            import threading
+            import asyncio
+            def _do_health_check():
+                try:
+                    asyncio.run(svc.check_health())
+                except Exception as e:
+                    logger.warning(f"后台健康检查执行异常: {e}")
+            
+            threading.Thread(target=_do_health_check, daemon=True).start()
+                
+            return svc
         else:
             from infrastructure.ai.local_embedding_service import LocalEmbeddingService
             logger.info("使用本地嵌入服务: path=%s, gpu=%s", _model_path, _use_gpu)
@@ -446,13 +465,26 @@ def get_embedding_service():
         if key:
             from infrastructure.ai.openai_embedding_service import OpenAIEmbeddingService
             base_url = os.getenv("EMBEDDING_BASE_URL") or os.getenv("OPENAI_BASE_URL") or None
+            _clean_base_url = base_url.strip(" ,") if base_url else None
             model = os.getenv("EMBEDDING_MODEL") or os.getenv("OPENAI_EMBEDDING_MODEL") or "text-embedding-3-small"
             logger.warning("本地 Embedding 模型缺失，自动切换到云端 embedding: %s", e)
-            return OpenAIEmbeddingService(
+            svc = OpenAIEmbeddingService(
                 api_key=key,
-                base_url=base_url,
+                base_url=_clean_base_url,
                 model=model,
             )
+            
+            import threading
+            import asyncio
+            def _do_health_check():
+                try:
+                    asyncio.run(svc.check_health())
+                except Exception as e:
+                    logger.warning(f"后台健康检查执行异常: {e}")
+            
+            threading.Thread(target=_do_health_check, daemon=True).start()
+            
+            return svc
         logger.warning("EmbeddingService 初始化失败: %s", e)
         return None
     except Exception as e:
