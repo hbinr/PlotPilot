@@ -5,12 +5,21 @@
 import logging
 from typing import Tuple, Dict, Any, AsyncIterator, Optional, List
 from application.engine.services.context_builder import ContextBuilder
+from application.engine.word_count_control import generate_with_word_control
+from application.engine.services.word_control_service import (
+    DEFAULT_MAX_TARGET,
+    DEFAULT_MIN_TARGET,
+    WordControlMetadata,
+    WordControlService,
+    effective_length,
+)
 from application.analyst.services.state_extractor import StateExtractor
 from application.analyst.services.state_updater import StateUpdater
 from application.audit.services.conflict_detection_service import ConflictDetectionService
 from application.engine.services.style_constraint_builder import build_style_summary
 from application.engine.dtos.generation_result import GenerationResult
 from application.engine.dtos.scene_director_dto import SceneDirectorAnalysis
+from application.engine.dtos.word_control_dto import WordControlDTO
 from application.audit.dtos.ghost_annotation import GhostAnnotation
 from domain.novel.services.consistency_checker import ConsistencyChecker
 from domain.novel.services.storyline_manager import StorylineManager
@@ -76,7 +85,8 @@ class AutoNovelGenerationWorkflow:
         foreshadowing_repository: Optional[ForeshadowingRepository] = None,
         conflict_detection_service: Optional[ConflictDetectionService] = None,
         voice_fingerprint_service: Optional['VoiceFingerprintService'] = None,
-        cliche_scanner: Optional['ClicheScanner'] = None
+        cliche_scanner: Optional['ClicheScanner'] = None,
+        word_control_service: Optional[WordControlService] = None,
     ):
         """初始化工作流
 
@@ -125,6 +135,8 @@ class AutoNovelGenerationWorkflow:
         self.conflict_detection_service = conflict_detection_service
         self.voice_fingerprint_service = voice_fingerprint_service
         self.cliche_scanner = cliche_scanner
+        self.theme_agent = None  # ThemeAgent 插槽，由外部注入
+        self.word_control_service = word_control_service or WordControlService()
 
     def prepare_chapter_generation(
         self,
@@ -193,6 +205,179 @@ class AutoNovelGenerationWorkflow:
             "ghost_annotations": ghost_annotations,
         }
 
+    def _resolve_target_word_count(self, target_word_count: Optional[int]) -> Optional[int]:
+        if target_word_count is None:
+            return None
+        self.word_control_service.validate_target(target_word_count)
+        return target_word_count
+
+    def _emit_word_control_warning(self, target_word_count: Optional[int]) -> Optional[Dict[str, Any]]:
+        if target_word_count is None:
+            return None
+        if not self.word_control_service.target_requires_warning(target_word_count):
+            return None
+        return {
+            "type": "warning",
+            "warning_type": "target_word_count_extreme",
+            "target_word_count": target_word_count,
+            "recommended_min": DEFAULT_MIN_TARGET,
+            "recommended_max": DEFAULT_MAX_TARGET,
+            "message": f"目标字数 {target_word_count} 偏离常用范围（建议 {DEFAULT_MIN_TARGET}-{DEFAULT_MAX_TARGET} 字）。",
+        }
+
+    def _serialize_word_control(self, metadata: Optional[WordControlMetadata]) -> Optional[WordControlDTO]:
+        if metadata is None:
+            return None
+        return WordControlDTO(
+            target=metadata.target,
+            actual=metadata.actual,
+            tolerance=metadata.tolerance,
+            delta=metadata.delta,
+            status=metadata.status,
+            within_tolerance=metadata.within_tolerance,
+            action=metadata.action,
+            expansion_attempts=metadata.expansion_attempts,
+            trim_applied=metadata.trim_applied,
+            fallback_used=metadata.fallback_used,
+            min_allowed=metadata.min_allowed,
+            max_allowed=metadata.max_allowed,
+        )
+
+    async def _generate_chapter_content(
+        self,
+        *,
+        context: str,
+        outline: str,
+        bundle: Dict[str, Any],
+        config: GenerationConfig,
+        chapter_number: int,
+        enable_beats: bool,
+        target_word_count: Optional[int],
+    ) -> tuple[str, list[dict[str, Any]]]:
+        beats = []
+        if enable_beats:
+            logger.info("  → 启用节拍模式，拆分大纲为微观节拍")
+            raw_beats = self.context_builder.magnify_outline_to_beats(chapter_number, outline)
+            if isinstance(raw_beats, list):
+                beats = raw_beats
+            else:
+                try:
+                    beats = list(raw_beats or [])
+                except TypeError:
+                    beats = []
+            logger.info(f"  ✓ 已拆分为 {len(beats)} 个微观节拍")
+
+        if enable_beats and beats:
+            content_parts = []
+            for i, beat in enumerate(beats):
+                beat_prompt_text = self.context_builder.build_beat_prompt(beat, i, len(beats))
+                logger.info(f"生成节拍 {i+1}/{len(beats)}: {beat.focus} - {beat.description[:50]}...")
+                prompt = self._build_prompt(
+                    context,
+                    outline,
+                    storyline_context=bundle["storyline_context"],
+                    plot_tension=bundle["plot_tension"],
+                    style_summary=bundle["style_summary"],
+                    beat_prompt=beat_prompt_text,
+                    beat_index=i,
+                    total_beats=len(beats),
+                    beat_target_words=beat.target_words,
+                    voice_anchors=bundle.get("voice_anchors") or "",
+                )
+                if target_word_count is not None:
+                    prompt = self.word_control_service.inject_length_requirements(
+                        prompt,
+                        target=target_word_count,
+                    )
+                llm_result = await self.llm_service.generate(prompt, config)
+                content_parts.append(llm_result.content)
+
+            content = "".join(content_parts)
+            logger.info(f"  ✓ 节拍生成完成: {len(beats)} 个节拍, {len(content)} 字符")
+        else:
+            prompt = self._build_prompt(
+                context,
+                outline,
+                storyline_context=bundle["storyline_context"],
+                plot_tension=bundle["plot_tension"],
+                style_summary=bundle["style_summary"],
+                voice_anchors=bundle.get("voice_anchors") or "",
+            )
+            if target_word_count is not None:
+                prompt = self.word_control_service.inject_length_requirements(
+                    prompt,
+                    target=target_word_count,
+                )
+            logger.info(f"  → 发送请求到 LLM (max_tokens={config.max_tokens}, temperature={config.temperature})")
+            llm_result = await self.llm_service.generate(prompt, config)
+            content = llm_result.content
+            logger.info(f"  ✓ LLM 响应已接收: {len(content)} 字符")
+
+        micro_beats = []
+        if beats:
+            micro_beats = [
+                {
+                    "description": beat.description,
+                    "target_words": beat.target_words,
+                    "focus": beat.focus,
+                }
+                for beat in beats
+            ]
+        return content, micro_beats
+
+    async def _apply_word_control(
+        self,
+        *,
+        content: str,
+        outline: str,
+        target_word_count: Optional[int],
+        emit_event: Optional[Any] = None,
+    ) -> tuple[str, Optional[WordControlMetadata]]:
+        if target_word_count is None:
+            return content, None
+
+        if emit_event:
+            await emit_event(
+                {
+                    "type": "phase",
+                    "phase": "post",
+                    "status_text": "字数检测与修正中",
+                    "word_control_step": "controlling",
+                }
+            )
+
+        async def llm_caller(prompt: Prompt):
+            return await self.llm_service.generate(prompt, GenerationConfig())
+
+        result = await generate_with_word_control(
+            prompt=Prompt(
+                system="你是长篇小说续写助手，负责补写当前章节缺失内容。",
+                user=outline,
+            ),
+            target_words=target_word_count,
+            llm_caller=llm_caller,
+            initial_content=content,
+            emit_event=emit_event,
+        )
+
+        controlled_content = result["content"]
+
+        metadata = WordControlMetadata(
+            target=result["target_word_count"],
+            actual=result["actual_word_count"],
+            tolerance=result["tolerance"],
+            delta=result["delta"],
+            status=result["status"],
+            within_tolerance=result["within_tolerance"],
+            action=result["action"],
+            expansion_attempts=result["expansion_attempts"],
+            trim_applied=result["trim_applied"],
+            fallback_used=result["fallback_used"],
+            min_allowed=result["min_allowed"],
+            max_allowed=result["max_allowed"],
+        )
+        return controlled_content, metadata
+
     async def generate_chapter(
         self,
         novel_id: str,
@@ -200,7 +385,7 @@ class AutoNovelGenerationWorkflow:
         outline: str,
         scene_director: Optional[SceneDirectorAnalysis] = None,
         enable_beats: bool = True,
-        target_words: int = 2500,
+        target_word_count: Optional[int] = None,
     ) -> GenerationResult:
         """生成章节（完整工作流）
 
@@ -222,6 +407,7 @@ class AutoNovelGenerationWorkflow:
             raise ValueError("chapter_number must be positive")
         if not outline or not outline.strip():
             raise ValueError("outline cannot be empty")
+        target_word_count = self._resolve_target_word_count(target_word_count)
 
         logger.info(f"========================================")
         logger.info(f"开始生成章节: 小说={novel_id}, 章节={chapter_number}")
@@ -238,67 +424,23 @@ class AutoNovelGenerationWorkflow:
 
         logger.info("阶段 3: 生成 - 调用 LLM")
         config = GenerationConfig()
-        
-        # 如果使用节拍模式，先放大节拍
-        beats = []
-        if enable_beats:
-            logger.info("  → 启用节拍模式，拆分大纲为微观节拍")
-            beats = self.context_builder.magnify_outline_to_beats(
-                chapter_number, outline, target_chapter_words=target_words
-            )
-            logger.info(f"  ✓ 已拆分为 {len(beats)} 个微观节拍")
-        
-        # 根据是否使用节拍选择不同的生成策略
-        if enable_beats and beats:
-            # 按节拍生成
-            content_parts = []
-            for i, beat in enumerate(beats):
-                beat_prompt_text = self.context_builder.build_beat_prompt(beat, i, len(beats))
-                logger.info(f"生成节拍 {i+1}/{len(beats)}: {beat.focus} - {beat.description[:50]}...")
-                
-                prompt = self._build_prompt(
-                    context,
-                    outline,
-                    storyline_context=bundle["storyline_context"],
-                    plot_tension=bundle["plot_tension"],
-                    style_summary=bundle["style_summary"],
-                    beat_prompt=beat_prompt_text,
-                    beat_index=i,
-                    total_beats=len(beats),
-                    beat_target_words=beat.target_words,
-                    voice_anchors=bundle.get("voice_anchors") or "",
-                )
-                
-                llm_result = await self.llm_service.generate(prompt, config)
-                beat_content = llm_result.content
-                content_parts.append(beat_content)
-            
-            content = "".join(content_parts)
-            logger.info(f"  ✓ 节拍生成完成: {len(beats)} 个节拍, {len(content)} 字符")
-        else:
-            # 传统单段生成
-            prompt = self._build_prompt(
-                context,
-                outline,
-                storyline_context=bundle["storyline_context"],
-                plot_tension=bundle["plot_tension"],
-                style_summary=bundle["style_summary"],
-                voice_anchors=bundle.get("voice_anchors") or "",
-            )
-            logger.info(f"  → 发送请求到 LLM (max_tokens={config.max_tokens}, temperature={config.temperature})")
-            llm_result = await self.llm_service.generate(prompt, config)
-            content = llm_result.content
-            logger.info(f"  ✓ LLM 响应已接收: {len(content)} 字符")
-        
-        # 保存微观节拍用于后续处理
-        if beats:
-            bundle["micro_beats"] = [
-                {
-                    "description": beat.description,
-                    "target_words": beat.target_words,
-                    "focus": beat.focus
-                } for beat in beats
-            ]
+        content, micro_beats = await self._generate_chapter_content(
+            context=context,
+            outline=outline,
+            bundle=bundle,
+            config=config,
+            chapter_number=chapter_number,
+            enable_beats=enable_beats,
+            target_word_count=target_word_count,
+        )
+        if micro_beats:
+            bundle["micro_beats"] = micro_beats
+
+        content, word_control = await self._apply_word_control(
+            content=content,
+            outline=outline,
+            target_word_count=target_word_count,
+        )
 
         logger.info("阶段 4: 后处理（post_process_generated_chapter）")
         post = await self.post_process_generated_chapter(
@@ -324,7 +466,8 @@ class AutoNovelGenerationWorkflow:
             context_used=context,
             token_count=token_count,
             ghost_annotations=ghost_annotations,
-            style_warnings=style_warnings
+            style_warnings=style_warnings,
+            word_control=self._serialize_word_control(word_control),
         )
 
     async def generate_chapter_stream(
@@ -334,7 +477,7 @@ class AutoNovelGenerationWorkflow:
         outline: str,
         scene_director: Optional[SceneDirectorAnalysis] = None,
         enable_beats: bool = True,
-        target_words: int = 2500,
+        target_word_count: Optional[int] = None,
     ) -> AsyncIterator[Dict[str, Any]]:
         """流式生成章节：阶段事件 + 正文 token 流 + 最终 done（含一致性报告）。
 
@@ -349,12 +492,16 @@ class AutoNovelGenerationWorkflow:
                 raise ValueError("chapter_number must be positive")
             if not outline or not outline.strip():
                 raise ValueError("outline cannot be empty")
+            target_word_count = self._resolve_target_word_count(target_word_count)
 
             logger.info(f"========================================")
             logger.info(f"开始流式生成章节: 小说={novel_id}, 章节={chapter_number}")
             logger.info(f"========================================")
 
             yield {"type": "phase", "phase": "planning"}
+            warning_event = self._emit_word_control_warning(target_word_count)
+            if warning_event:
+                yield warning_event
             yield {"type": "phase", "phase": "context"}
             logger.info("阶段 1-2: prepare_chapter_generation（规划 + 结构化上下文）")
             bundle = self.prepare_chapter_generation(
@@ -373,9 +520,14 @@ class AutoNovelGenerationWorkflow:
             beats = []
             if enable_beats:
                 logger.info("  → 启用节拍模式，拆分大纲为微观节拍")
-                beats = self.context_builder.magnify_outline_to_beats(
-                    chapter_number, outline, target_chapter_words=target_words
-                )
+                raw_beats = self.context_builder.magnify_outline_to_beats(chapter_number, outline)
+                if isinstance(raw_beats, list):
+                    beats = raw_beats
+                else:
+                    try:
+                        beats = list(raw_beats or [])
+                    except TypeError:
+                        beats = []
                 logger.info(f"  ✓ 已拆分为 {len(beats)} 个微观节拍")
                 
                 # 发送节拍信息用于前端展示
@@ -410,6 +562,11 @@ class AutoNovelGenerationWorkflow:
                         beat_target_words=beat.target_words,
                         voice_anchors=bundle.get("voice_anchors") or "",
                     )
+                    if target_word_count is not None:
+                        prompt = self.word_control_service.inject_length_requirements(
+                            prompt,
+                            target=target_word_count,
+                        )
                     
                     beat_content = ""
                     async for piece in self.llm_service.stream_generate(prompt, config):
@@ -436,6 +593,11 @@ class AutoNovelGenerationWorkflow:
                     style_summary=bundle["style_summary"],
                     voice_anchors=bundle.get("voice_anchors") or "",
                 )
+                if target_word_count is not None:
+                    prompt = self.word_control_service.inject_length_requirements(
+                        prompt,
+                        target=target_word_count,
+                    )
                 
                 logger.info(f"  → 发送流式请求到 LLM")
                 parts: list[str] = []
@@ -464,8 +626,23 @@ class AutoNovelGenerationWorkflow:
                 yield {"type": "error", "message": "模型返回空内容"}
                 return
 
+            async def emit_word_control_event(event: Dict[str, Any]) -> None:
+                yieldable = dict(event)
+                if target_word_count is not None:
+                    yieldable["target_word_count"] = target_word_count
+                events_buffer.append(yieldable)
+
             yield {"type": "phase", "phase": "post"}
             logger.info("阶段 4: post_process_generated_chapter")
+            events_buffer: List[Dict[str, Any]] = []
+            content, word_control = await self._apply_word_control(
+                content=content,
+                outline=outline,
+                target_word_count=target_word_count,
+                emit_event=emit_word_control_event,
+            )
+            for buffered_event in events_buffer:
+                yield buffered_event
             post = await self.post_process_generated_chapter(
                 novel_id, chapter_number, outline, content, scene_director=scene_director
             )
@@ -492,6 +669,9 @@ class AutoNovelGenerationWorkflow:
                 "output_tokens": output_tokens,
                 "total_tokens": total_tokens,
                 "chars": len(content),
+                "target_word_count": target_word_count,
+                "actual_word_count": effective_length(content),
+                "word_control": self._serialize_word_control(word_control).to_dict() if word_control else None,
                 "ghost_annotations": [ann.to_dict() for ann in ghost_annotations],
                 "style_warnings": [
                     {
@@ -698,6 +878,17 @@ class AutoNovelGenerationWorkflow:
                 + "\n\n以上约束须与本章大纲及后文 Bible/摘要一致；不得与之矛盾。\n"
             )
 
+        # 题材专项指导（ThemeAgent 插槽）
+        theme_section = ""
+        if self.theme_agent:
+            try:
+                theme_directives = self.theme_agent.get_context_directives("", 0, outline)
+                theme_text = theme_directives.to_context_text() if theme_directives else ""
+                if theme_text:
+                    theme_section = f"\n【题材专项指导】\n{theme_text}\n\n"
+            except Exception as e:
+                logger.warning(f"ThemeAgent.get_context_directives 失败（降级跳过）：{e}")
+
         voice_block = ""
         if va:
             voice_block = (
@@ -718,9 +909,34 @@ class AutoNovelGenerationWorkflow:
                 "不要重复已写内容。\n"
             )
 
-        system_message = f"""你是一位专业的网络小说作家。根据以下上下文撰写章节内容。
+        # 题材人设：如有 ThemeAgent 且提供了专项人设，替换默认人设
+        persona = "你是一位专业的网络小说作家。根据以下上下文撰写章节内容。"
+        if self.theme_agent:
+            try:
+                custom_persona = self.theme_agent.get_system_persona()
+                if custom_persona:
+                    persona = f"{custom_persona}根据以下上下文撰写章节内容。"
+            except Exception as e:
+                logger.warning(f"ThemeAgent.get_system_persona 失败（使用默认人设）：{e}")
 
-{planning_section}{voice_block}{context}
+        # 题材专项写作规则
+        theme_rules_text = ""
+        if self.theme_agent:
+            try:
+                theme_rules = self.theme_agent.get_writing_rules()
+                if theme_rules:
+                    # 从第 9 条开始编号（默认规则 1-8 + beat_extra 可能占 9）
+                    start_num = 10 if beat_extra else 9
+                    theme_rules_lines = "\n".join(
+                        f"{start_num + i}. {rule}" for i, rule in enumerate(theme_rules)
+                    )
+                    theme_rules_text = f"\n{theme_rules_lines}"
+            except Exception as e:
+                logger.warning(f"ThemeAgent.get_writing_rules 失败（降级跳过）：{e}")
+
+        system_message = f"""{persona}
+
+{planning_section}{theme_section}{voice_block}{context}
 
 写作要求：
 1. 必须有多个人物互动（至少2-3个角色出场）
@@ -730,7 +946,7 @@ class AutoNovelGenerationWorkflow:
 5. 推进情节发展
 6. 使用生动的场景描写和细节
 {length_rule}
-8. 用中文写作，使用第三人称叙事{beat_extra}"""
+8. 用中文写作，使用第三人称叙事{beat_extra}{theme_rules_text}"""
 
         user_message = f"""请根据以下大纲撰写本章内容：
 

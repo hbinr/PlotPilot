@@ -24,6 +24,8 @@ from application.engine.services.background_task_service import BackgroundTaskSe
 from application.workflows.auto_novel_generation_workflow import AutoNovelGenerationWorkflow
 from application.engine.services.chapter_aftermath_pipeline import ChapterAftermathPipeline
 from application.engine.services.style_constraint_builder import build_style_summary
+from application.engine.services.word_control_service import effective_length
+from application.config import AppConfig
 from domain.novel.value_objects.chapter_id import ChapterId
 
 logger = logging.getLogger(__name__)
@@ -52,6 +54,7 @@ class AutopilotDaemon:
         aftermath_pipeline: Optional[ChapterAftermathPipeline] = None,
         volume_summary_service=None,
         foreshadowing_repository=None,
+        chapter_generation_metrics_repository=None,
     ):
         self.novel_repository = novel_repository
         self.llm_service = llm_service
@@ -67,6 +70,8 @@ class AutopilotDaemon:
         self.aftermath_pipeline = aftermath_pipeline
         self.volume_summary_service = volume_summary_service
         self.foreshadowing_repository = foreshadowing_repository
+        self.theme_agent = None  # ThemeAgent 插槽，由外部注入
+        self.chapter_generation_metrics_repository = chapter_generation_metrics_repository
         
         # 惰性初始化 VolumeSummaryService
         if not self.volume_summary_service and llm_service and story_node_repo:
@@ -179,12 +184,133 @@ class AutopilotDaemon:
         self._merge_autopilot_status_from_db(novel)
         self.novel_repository.save(novel)
 
+    def _load_theme_agent_for_novel(self, novel: Novel) -> None:
+        """根据 novel.genre 动态加载题材 Agent 到管线各组件
+
+        每轮 _process_novel 调用一次，确保 genre 变更能实时生效。
+        如果 genre 为空或无对应 Agent，则清除已有的 theme_agent（退化为通用模式）。
+        仅在 novel.theme_agent_enabled 为 True 时才加载，否则走原有通用路线。
+
+        同时根据 novel.enabled_theme_skills 列表，为 Agent 注入用户选择的增强技能。
+        """
+        genre = getattr(novel, 'genre', '') or ''
+        enabled = getattr(novel, 'theme_agent_enabled', False)
+        agent = None
+
+        if enabled and genre and self._theme_registry:
+            agent = self._theme_registry.get(genre)
+            if agent:
+                logger.debug(f"[{novel.novel_id}] 已加载题材 Agent：{agent}")
+                # 加载用户启用的增强技能
+                self._inject_skills_to_agent(agent, novel)
+            else:
+                logger.debug(f"[{novel.novel_id}] 未找到 genre='{genre}' 对应的题材 Agent，走通用路线")
+        elif not enabled and genre:
+            logger.debug(f"[{novel.novel_id}] 专项题材 Agent 未启用（genre='{genre}'），走通用路线")
+
+        # 注入到管线各组件（幂等设置，无 agent 时清 None）
+        self.theme_agent = agent
+        if self.chapter_workflow:
+            self.chapter_workflow.theme_agent = agent
+        if self.context_builder:
+            self.context_builder.theme_agent = agent
+            if hasattr(self.context_builder, 'budget_allocator') and self.context_builder.budget_allocator:
+                self.context_builder.budget_allocator.theme_agent = agent
+
+    def _inject_skills_to_agent(self, agent, novel: Novel) -> None:
+        """根据 novel.enabled_theme_skills 将技能注入 Agent
+
+        通过覆盖 agent 的 _injected_skills 属性实现动态技能加载，
+        并 monkey-patch get_skills() 方法使其返回注入的技能列表。
+        同时加载用户自定义技能（custom_theme_skills 表）。
+        """
+        skill_keys = getattr(novel, 'enabled_theme_skills', []) or []
+        if not skill_keys:
+            # 无技能配置时，清除之前可能注入的技能
+            if hasattr(agent, '_injected_skills'):
+                delattr(agent, '_injected_skills')
+                # 恢复原始 get_skills
+                if hasattr(agent, '_original_get_skills'):
+                    agent.get_skills = agent._original_get_skills
+                    delattr(agent, '_original_get_skills')
+            return
+
+        try:
+            skills = []
+
+            # 1. 从内置 SkillRegistry 加载
+            skill_registry = self._skill_registry
+            if skill_registry:
+                builtin_keys = [k for k in skill_keys if not k.startswith("custom_")]
+                skills.extend(skill_registry.get_skills_by_keys(builtin_keys))
+
+            # 2. 从 DB 加载自定义技能
+            custom_keys = [k for k in skill_keys if k.startswith("custom_")]
+            if custom_keys:
+                try:
+                    from infrastructure.persistence.database.sqlite_custom_skill_repository import SqliteCustomSkillRepository
+                    from application.engine.theme.skills.custom_skill_wrapper import CustomThemeSkillWrapper
+                    custom_repo = SqliteCustomSkillRepository(self.novel_repository.db)
+                    novel_id = novel.novel_id.value if hasattr(novel.novel_id, 'value') else str(novel.novel_id)
+                    custom_rows = custom_repo.list_by_novel(novel_id)
+                    for row in custom_rows:
+                        if row["skill_key"] in custom_keys:
+                            skills.append(CustomThemeSkillWrapper(row))
+                except Exception as e:
+                    logger.warning(f"[{novel.novel_id}] 加载自定义技能失败：{e}")
+
+            if skills:
+                agent._injected_skills = skills
+                # 保存原始 get_skills 并 monkey-patch
+                if not hasattr(agent, '_original_get_skills'):
+                    agent._original_get_skills = agent.get_skills
+                agent.get_skills = lambda: agent._injected_skills
+                logger.debug(
+                    f"[{novel.novel_id}] 已注入 {len(skills)} 个增强技能: "
+                    f"{[s.skill_key for s in skills]}"
+                )
+        except Exception as e:
+            logger.warning(f"[{novel.novel_id}] 加载增强技能失败：{e}")
+
+    @property
+    def _theme_registry(self):
+        """惰性获取 ThemeAgentRegistry（首次调用时初始化）"""
+        if not hasattr(self, '_registry_instance'):
+            try:
+                from application.engine.theme.theme_registry import ThemeAgentRegistry
+                registry = ThemeAgentRegistry()
+                registry.auto_discover()
+                self._registry_instance = registry
+                logger.info(f"ThemeAgentRegistry 初始化完成：{registry}")
+            except Exception as e:
+                logger.warning(f"ThemeAgentRegistry 初始化失败（题材功能不可用）：{e}")
+                self._registry_instance = None
+        return self._registry_instance
+
+    @property
+    def _skill_registry(self):
+        """惰性获取 ThemeSkillRegistry（首次调用时初始化）"""
+        if not hasattr(self, '_skill_registry_instance'):
+            try:
+                from application.engine.theme.skill_registry import ThemeSkillRegistry
+                registry = ThemeSkillRegistry()
+                registry.auto_discover()
+                self._skill_registry_instance = registry
+                logger.info(f"ThemeSkillRegistry 初始化完成：{registry}")
+            except Exception as e:
+                logger.warning(f"ThemeSkillRegistry 初始化失败（增强技能不可用）：{e}")
+                self._skill_registry_instance = None
+        return self._skill_registry_instance
+
     async def _process_novel(self, novel: Novel):
         """处理单个小说（全流程）"""
         try:
             if not self._is_still_running(novel):
                 logger.info(f"[{novel.novel_id}] 用户已停止自动驾驶，跳过本轮")
                 return
+
+            # 根据 novel.genre 动态加载题材 Agent
+            self._load_theme_agent_for_novel(novel)
 
             stage_name = novel.current_stage.value
             logger.debug(f"[{novel.novel_id}] 当前阶段: {stage_name}")
@@ -536,9 +662,20 @@ class AutopilotDaemon:
 
         chapter_num = next_chapter_node.number
         outline = next_chapter_node.outline or next_chapter_node.description or next_chapter_node.title
+        target_word_count = max(1, int(getattr(novel, "target_words_per_chapter", AppConfig.DEFAULT_WORDS_PER_CHAPTER) or AppConfig.DEFAULT_WORDS_PER_CHAPTER))
 
         if needs_buffer:
-            outline = f"【缓冲章：日常过渡】{outline}。主角战后休整，与配角闲聊，展示收获，节奏轻松。"
+            # 优先使用题材专项缓冲章模板
+            buffer_outline = ""
+            if self.theme_agent:
+                try:
+                    buffer_outline = self.theme_agent.get_buffer_chapter_template(outline)
+                except Exception as e:
+                    logger.warning(f"ThemeAgent.get_buffer_chapter_template 失败（降级默认）：{e}")
+            if buffer_outline:
+                outline = buffer_outline
+            else:
+                outline = f"【缓冲章：日常过渡】{outline}。主角战后休整，与配角闲聊，展示收获，节奏轻松。"
 
         logger.info(f"[{novel.novel_id}] 📖 开始写第 {chapter_num} 章：{outline[:60]}...")
         logger.info(f"[{novel.novel_id}]    进度: {current_chapters}/{target_chapters} 章（目标）")
@@ -593,7 +730,9 @@ class AutopilotDaemon:
         beats = []
         if self.context_builder:
             beats = self.context_builder.magnify_outline_to_beats(
-                chapter_num, outline, target_chapter_words=novel.target_words_per_chapter
+                chapter_num,
+                outline,
+                target_chapter_words=target_word_count,
             )
 
         if not self._is_still_running(novel):
@@ -629,6 +768,10 @@ class AutopilotDaemon:
                         total_beats=len(beats),
                         beat_target_words=int(beat.target_words),
                         voice_anchors=voice_anchors,
+                    )
+                    prompt = self.chapter_workflow.word_control_service.inject_length_requirements(
+                        prompt,
+                        target=target_word_count,
                     )
                     max_tokens = int(beat.target_words * 1.5)
                     cfg = GenerationConfig(max_tokens=max_tokens, temperature=0.85)
@@ -669,6 +812,10 @@ class AutopilotDaemon:
                     style_summary=bundle["style_summary"],
                     voice_anchors=voice_anchors,
                 )
+                prompt = self.chapter_workflow.word_control_service.inject_length_requirements(
+                    prompt,
+                    target=target_word_count,
+                )
                 cfg = GenerationConfig(max_tokens=3000, temperature=0.85)
                 beat_content = await self._stream_llm_with_stop_watch(prompt, cfg, novel=novel)
             else:
@@ -688,6 +835,45 @@ class AutopilotDaemon:
             self._flush_novel(novel)
             return
 
+        word_control_metrics = None
+        if use_wf and chapter_content.strip():
+            try:
+                chapter_content, word_control = await self.chapter_workflow._apply_word_control(
+                    content=chapter_content,
+                    outline=outline,
+                    target_word_count=target_word_count,
+                )
+                if word_control is not None:
+                    serialized = self.chapter_workflow._serialize_word_control(word_control)
+                    word_control_metrics = serialized.to_dict() if serialized is not None else None
+                    if word_control_metrics is not None:
+                        word_control_metrics["generated_via"] = "autopilot"
+            except Exception as e:
+                logger.warning(f"字数控制闭环失败（仍继续写作流程）：{e}")
+        elif chapter_content.strip() and self.chapter_workflow:
+            try:
+                check = self.chapter_workflow.word_control_service.check_word_count(
+                    chapter_content,
+                    target_word_count,
+                )
+                word_control_metrics = {
+                    "generated_via": "autopilot",
+                    "target": check.target,
+                    "actual": check.actual,
+                    "tolerance": check.tolerance,
+                    "delta": check.delta,
+                    "status": check.status,
+                    "within_tolerance": check.within_tolerance,
+                    "action": "none",
+                    "expansion_attempts": 0,
+                    "trim_applied": False,
+                    "fallback_used": False,
+                    "min_allowed": check.min_allowed,
+                    "max_allowed": check.max_allowed,
+                }
+            except Exception:
+                word_control_metrics = None
+
         if use_wf and chapter_content.strip():
             try:
                 await self.chapter_workflow.post_process_generated_chapter(
@@ -698,7 +884,13 @@ class AutopilotDaemon:
                 logger.warning(f"post_process_generated_chapter 失败（仍落库）：{e}")
 
         # 7. 章节完成，标记 completed
-        await self._upsert_chapter_content(novel, next_chapter_node, chapter_content, status="completed")
+        await self._upsert_chapter_content(
+            novel,
+            next_chapter_node,
+            chapter_content,
+            status="completed",
+            generation_metrics=word_control_metrics,
+        )
 
         # 8. 更新计数器，重置节拍索引
         novel.current_auto_chapters = (novel.current_auto_chapters or 0) + 1
@@ -741,6 +933,25 @@ class AutopilotDaemon:
             content,
             drift_result,
         )
+        if self.chapter_generation_metrics_repository:
+            existing_metrics = self.chapter_generation_metrics_repository.get(
+                novel.novel_id.value,
+                chapter_num,
+            )
+            if existing_metrics:
+                existing_metrics["actual"] = effective_length(content)
+                existing_metrics["delta"] = existing_metrics["actual"] - int(existing_metrics.get("target") or 0)
+                existing_metrics["status"] = (
+                    "too_short" if existing_metrics["actual"] < existing_metrics["min_allowed"]
+                    else "too_long" if existing_metrics["actual"] > existing_metrics["max_allowed"]
+                    else "ok"
+                )
+                existing_metrics["within_tolerance"] = existing_metrics["status"] == "ok"
+                self.chapter_generation_metrics_repository.upsert(
+                    novel.novel_id.value,
+                    chapter_num,
+                    existing_metrics,
+                )
 
         # 2. 统一章后管线：叙事/向量、文风（一次）、KG 推断；三元组与伏笔在叙事同步单次 LLM 中落库
         if self.aftermath_pipeline:
@@ -1237,7 +1448,14 @@ class AutopilotDaemon:
         config = GenerationConfig(max_tokens=max_tokens, temperature=0.85)
         return await self._stream_llm_with_stop_watch(prompt, config, novel=novel)
 
-    async def _upsert_chapter_content(self, novel, chapter_node, content: str, status: str):
+    async def _upsert_chapter_content(
+        self,
+        novel,
+        chapter_node,
+        content: str,
+        status: str,
+        generation_metrics: Optional[Dict[str, Any]] = None,
+    ):
         """最小事务：只更新章节内容，不涉及其他表"""
         from domain.novel.entities.chapter import Chapter, ChapterStatus
         from domain.novel.value_objects.novel_id import NovelId
@@ -1265,6 +1483,12 @@ class AutopilotDaemon:
                 status=ChapterStatus(status)
             )
             self.chapter_repository.save(chapter)
+        if generation_metrics and self.chapter_generation_metrics_repository:
+            self.chapter_generation_metrics_repository.upsert(
+                novel.novel_id.value,
+                chapter_node.number,
+                generation_metrics,
+            )
 
     async def _find_next_unwritten_chapter_async(self, novel):
         """找到下一个未写的章节节点"""

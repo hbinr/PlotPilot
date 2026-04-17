@@ -18,6 +18,7 @@ from domain.ai.value_objects.token_usage import TokenUsage
 def mock_context_builder():
     """Mock ContextBuilder"""
     builder = Mock(spec=ContextBuilder)
+    builder.magnify_outline_to_beats.return_value = []
     builder.build_structured_context.return_value = {
         "layer1_text": "Layer 1 context",
         "layer2_text": "Layer 2 context",
@@ -182,6 +183,19 @@ class TestGenerateChapter:
                 outline=""
             )
 
+    @pytest.mark.asyncio
+    async def test_generate_chapter_returns_word_control_metadata(self, workflow):
+        result = await workflow.generate_chapter(
+            novel_id="novel-1",
+            chapter_number=1,
+            outline="Chapter 1 outline",
+            target_word_count=20,
+            enable_beats=False,
+        )
+        assert result.word_control is not None
+        assert result.word_control.target == 20
+        assert result.word_control.status in {"ok", "too_short", "too_long"}
+
 
 class TestGenerateChapterWithReview:
     """测试 generate_chapter_with_review 方法"""
@@ -231,6 +245,23 @@ class TestGenerateChapterStream:
         assert events[-1]["type"] == "done"
         assert events[-1]["content"] == "Generated chapter content"
         assert events[-1]["token_count"] == 9250
+
+    @pytest.mark.asyncio
+    async def test_stream_done_includes_word_control_when_target_requested(self, workflow):
+        events = []
+        async for e in workflow.generate_chapter_stream(
+            "novel-1",
+            1,
+            "Chapter outline",
+            target_word_count=20,
+            enable_beats=False,
+        ):
+            events.append(e)
+        done_event = events[-1]
+        assert done_event["type"] == "done"
+        assert done_event["target_word_count"] == 20
+        assert done_event["word_control"] is not None
+        assert done_event["word_control"]["target"] == 20
 
 
 class TestExtractChapterState:
@@ -556,9 +587,9 @@ class TestStyleIntegration:
         # 验证 LLM 被调用
         assert mock_llm_service.generate.called
 
-        # 获取传递给 LLM 的第一个 prompt (章节生成)
-        first_call = mock_llm_service.generate.call_args_list[0]
-        prompt = first_call.args[0] if first_call.args else first_call.kwargs.get('prompt')
+        # 获取传递给 LLM 的 prompt
+        call_args = mock_llm_service.generate.call_args_list[0]
+        prompt = call_args[0][0]
 
         # 验证 prompt 包含风格指纹摘要
         assert "形容词密度" in prompt.system or "平均句长" in prompt.system

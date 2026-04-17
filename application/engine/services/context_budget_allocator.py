@@ -23,6 +23,7 @@ from infrastructure.persistence.database.story_node_repository import StoryNodeR
 from domain.ai.services.vector_store import VectorStore
 from domain.ai.services.embedding_service import EmbeddingService
 from application.ai.vector_retrieval_facade import VectorRetrievalFacade
+from application.config import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ class ContextSlot:
 class BudgetAllocation:
     """预算分配结果"""
     slots: Dict[str, ContextSlot] = field(default_factory=dict)
-    total_budget: int = 35000
+    total_budget: int = AppConfig.CONTEXT_MAX_TOKENS
     used_tokens: int = 0
     remaining_tokens: int = 0
     
@@ -139,6 +140,7 @@ class ContextBudgetAllocator:
     MAX_ACT_SUMMARIES_TOKENS = 1500
     MAX_RECENT_CHAPTERS_TOKENS = 5000
     MAX_VECTOR_RECALL_TOKENS = 5000
+    MAX_THEME_DIRECTIVES_TOKENS = 1500
     
     def __init__(
         self,
@@ -150,6 +152,7 @@ class ContextBudgetAllocator:
         triple_repository = None,
         vector_store: Optional[VectorStore] = None,
         embedding_service: Optional[EmbeddingService] = None,
+        theme_agent = None,
     ):
         self.foreshadowing_repo = foreshadowing_repository
         self.chapter_repo = chapter_repository
@@ -157,6 +160,7 @@ class ContextBudgetAllocator:
         self.story_node_repo = story_node_repository
         self.chapter_element_repo = chapter_element_repository
         self.triple_repo = triple_repository
+        self.theme_agent = theme_agent  # ThemeAgent 插槽
         
         # 向量检索门面
         self.vector_facade = None
@@ -193,7 +197,7 @@ class ContextBudgetAllocator:
         novel_id: str,
         chapter_number: int,
         outline: str,
-        total_budget: int = 35000,
+        total_budget: int = AppConfig.CONTEXT_MAX_TOKENS,
         scene_director: Optional[Dict[str, Any]] = None,
     ) -> BudgetAllocation:
         """执行预算分配
@@ -327,6 +331,23 @@ class ContextBudgetAllocator:
             max_tokens=1500,  # 最大 1500 tokens
             priority=85,  # 介于角色锚点和伏笔之间
         )
+
+        # 5. 题材指导（ThemeAgent 插槽）
+        if self.theme_agent:
+            try:
+                directives = self.theme_agent.get_context_directives(novel_id, chapter_number, outline)
+                theme_text = directives.to_context_text() if directives else ""
+                if theme_text:
+                    slots["theme_directives"] = ContextSlot(
+                        name="题材指导",
+                        tier=PriorityTier.T0_CRITICAL,
+                        content=theme_text,
+                        tokens=self.estimate_tokens(theme_text),
+                        max_tokens=self.MAX_THEME_DIRECTIVES_TOKENS,
+                        priority=75,  # 低于人设冲突和伏笔，高于图谱
+                    )
+            except Exception as e:
+                logger.warning(f"ThemeAgent.get_context_directives 失败（降级跳过）：{e}")
         
         # ==================== T1: 可压缩内容 ====================
         
