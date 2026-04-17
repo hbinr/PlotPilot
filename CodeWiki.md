@@ -151,8 +151,8 @@ PlotPilot 采用了严格的**领域驱动设计（DDD，Domain-Driven Design）
 
 ```bash
 cd frontend
-npm install
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
 前端将默认运行在 [http://localhost:3000](http://localhost:3000)，在浏览器中打开即可开始创作。

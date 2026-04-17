@@ -187,7 +187,7 @@ class ContextBuilder:
             },
         }
 
-    def magnify_outline_to_beats(self, chapter_number: int, outline: str, target_chapter_words: int = 3500) -> List[Beat]:
+    def magnify_outline_to_beats(self, chapter_number: int, outline: str, target_chapter_words: int = 2500) -> List[Beat]:
         """节拍放大器：将章节大纲拆分为微观节拍
         
         核心策略：

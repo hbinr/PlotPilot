@@ -199,7 +199,8 @@ class AutoNovelGenerationWorkflow:
         chapter_number: int,
         outline: str,
         scene_director: Optional[SceneDirectorAnalysis] = None,
-        enable_beats: bool = True
+        enable_beats: bool = True,
+        target_words: int = 2500,
     ) -> GenerationResult:
         """生成章节（完整工作流）
 
@@ -242,7 +243,9 @@ class AutoNovelGenerationWorkflow:
         beats = []
         if enable_beats:
             logger.info("  → 启用节拍模式，拆分大纲为微观节拍")
-            beats = self.context_builder.magnify_outline_to_beats(chapter_number, outline)
+            beats = self.context_builder.magnify_outline_to_beats(
+                chapter_number, outline, target_chapter_words=target_words
+            )
             logger.info(f"  ✓ 已拆分为 {len(beats)} 个微观节拍")
         
         # 根据是否使用节拍选择不同的生成策略
@@ -330,7 +333,8 @@ class AutoNovelGenerationWorkflow:
         chapter_number: int,
         outline: str,
         scene_director: Optional[SceneDirectorAnalysis] = None,
-        enable_beats: bool = True
+        enable_beats: bool = True,
+        target_words: int = 2500,
     ) -> AsyncIterator[Dict[str, Any]]:
         """流式生成章节：阶段事件 + 正文 token 流 + 最终 done（含一致性报告）。
 
@@ -369,7 +373,9 @@ class AutoNovelGenerationWorkflow:
             beats = []
             if enable_beats:
                 logger.info("  → 启用节拍模式，拆分大纲为微观节拍")
-                beats = self.context_builder.magnify_outline_to_beats(chapter_number, outline)
+                beats = self.context_builder.magnify_outline_to_beats(
+                    chapter_number, outline, target_chapter_words=target_words
+                )
                 logger.info(f"  ✓ 已拆分为 {len(beats)} 个微观节拍")
                 
                 # 发送节拍信息用于前端展示

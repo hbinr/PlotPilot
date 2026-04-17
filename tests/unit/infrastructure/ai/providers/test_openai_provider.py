@@ -207,12 +207,24 @@ class TestOpenAIProviderResponses:
             output=[],
             usage=SimpleNamespace(prompt_tokens=5, completion_tokens=0),
         )
+        empty_chat_response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=None))],
+            usage=SimpleNamespace(prompt_tokens=5, completion_tokens=0),
+        )
+        empty_chat_stream = _FakeStream([
+            SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content=None))],
+                usage=SimpleNamespace(prompt_tokens=5, completion_tokens=0),
+            ),
+        ])
 
-        with patch.object(provider.async_client.responses, "create", new_callable=AsyncMock) as mock_create:
-            mock_create.return_value = response
+        with patch.object(provider.async_client.responses, "create", new_callable=AsyncMock) as mock_responses:
+            with patch.object(provider.async_client.chat.completions, "create", new_callable=AsyncMock) as mock_chat:
+                mock_responses.return_value = response
+                mock_chat.side_effect = [empty_chat_response, empty_chat_stream]
 
-            with pytest.raises(RuntimeError, match="empty content"):
-                await provider.generate(prompt, config)
+                with pytest.raises(RuntimeError, match="empty content"):
+                    await provider.generate(prompt, config)
 
 
 class TestProfilePassthrough:

@@ -226,7 +226,8 @@ class HostedWriteStreamRequest(BaseModel):
 async def generate_chapter_stream(
     novel_id: str,
     request: GenerateChapterRequest,
-    workflow: AutoNovelGenerationWorkflow = Depends(get_auto_workflow)
+    workflow: AutoNovelGenerationWorkflow = Depends(get_auto_workflow),
+    novel_service=Depends(get_novel_service)
 ):
     """流式生成章节（SSE）
 
@@ -241,6 +242,15 @@ async def generate_chapter_stream(
     logger.info(f"  大纲长度: {len(request.outline)} 字符")
 
     async def event_gen():
+        # 获取小说设置的目标字数
+        target_words = 2500
+        try:
+            novel = novel_service.get_novel(novel_id)
+            if novel and hasattr(novel, 'target_words_per_chapter'):
+                target_words = novel.target_words_per_chapter
+        except Exception as e:
+            logger.warning(f"获取小说配置失败，使用默认字数: {e}")
+
         # 转换 scene_director_result 为 SceneDirectorAnalysis（如果提供）
         scene_director = None
         if request.scene_director_result:
@@ -250,7 +260,8 @@ async def generate_chapter_stream(
             novel_id=novel_id,
             chapter_number=request.chapter_number,
             outline=request.outline,
-            scene_director=scene_director
+            scene_director=scene_director,
+            target_words=target_words
         ):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 

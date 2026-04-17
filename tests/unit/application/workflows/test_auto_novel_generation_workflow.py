@@ -29,6 +29,10 @@ def mock_context_builder():
             "total": 9250
         }
     }
+    from application.engine.services.context_builder import Beat
+    builder.magnify_outline_to_beats.return_value = [
+        Beat(description="Beat 1", target_words=500, focus="action")
+    ]
     # 不再需要 estimate_tokens 方法
     return builder
 
@@ -552,9 +556,9 @@ class TestStyleIntegration:
         # 验证 LLM 被调用
         assert mock_llm_service.generate.called
 
-        # 获取传递给 LLM 的 prompt
-        call_args = mock_llm_service.generate.call_args
-        prompt = call_args[0][0]
+        # 获取传递给 LLM 的第一个 prompt (章节生成)
+        first_call = mock_llm_service.generate.call_args_list[0]
+        prompt = first_call.args[0] if first_call.args else first_call.kwargs.get('prompt')
 
         # 验证 prompt 包含风格指纹摘要
         assert "形容词密度" in prompt.system or "平均句长" in prompt.system
