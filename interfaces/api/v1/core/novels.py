@@ -16,6 +16,7 @@ from interfaces.api.dependencies import (
     get_custom_skill_repository,
 )
 from domain.shared.exceptions import EntityNotFoundError
+from application.config import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class CreateNovelRequest(BaseModel):
     title: str = Field(..., description="小说标题")
     author: str = Field(..., description="作者")
     target_chapters: int = Field(..., gt=0, description="目标章节数")
-    target_words_per_chapter: int = Field(default=3500, gt=0, description="每章目标字数")
+    target_words_per_chapter: int = Field(default=AppConfig.DEFAULT_WORDS_PER_CHAPTER, gt=0, description="每章目标字数")
     premise: str = Field(default="", description="故事梗概/创意")
     genre: str = Field(default="", description="题材类型（可选，如 xuanhuan/suspense/romance）")
 

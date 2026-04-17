@@ -59,7 +59,7 @@ class Novel(BaseEntity):
         last_audit_quality_scores: Optional[Dict[str, float]] = None,
         last_audit_issues: Optional[List[Dict[str, str]]] = None,
         # 目标字数控制
-        target_words_per_chapter: int = 3500,
+        target_words_per_chapter: int = 3500,  # 默认值由 AppConfig.DEFAULT_WORDS_PER_CHAPTER 管理
         # 题材类型（可选，用于加载专项题材 Agent）
         genre: str = "",
         # 是否启用专项题材 Agent（开关，默认关闭走通用路线）

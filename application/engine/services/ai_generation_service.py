@@ -2,6 +2,7 @@
 import logging
 from typing import Optional
 from application.engine.word_count_control import generate_with_word_control
+from application.config import AppConfig
 from domain.ai.services.llm_service import LLMService, GenerationConfig
 from domain.ai.value_objects.prompt import Prompt
 from domain.novel.repositories.novel_repository import NovelRepository
@@ -84,7 +85,7 @@ class AIGenerationService:
 
             generation_result = await generate_with_word_control(
                 prompt=prompt,
-                target_words=getattr(novel, "target_words_per_chapter", 3500),
+                target_words=getattr(novel, "target_words_per_chapter", AppConfig.DEFAULT_WORDS_PER_CHAPTER),
                 llm_caller=llm_caller,
             )
             logger.info(f"Successfully generated chapter {chapter_number} for novel {novel_id}")

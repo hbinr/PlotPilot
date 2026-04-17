@@ -8,6 +8,7 @@ from domain.novel.value_objects.word_count import WordCount
 from domain.novel.repositories.novel_repository import NovelRepository
 from domain.novel.repositories.chapter_repository import ChapterRepository
 from domain.shared.exceptions import EntityNotFoundError
+from application.config import AppConfig
 from application.core.dtos.novel_dto import NovelDTO
 from domain.structure.story_node import StoryNode, NodeType, PlanningStatus, PlanningSource
 from infrastructure.persistence.database.story_node_repository import StoryNodeRepository
@@ -81,7 +82,7 @@ class NovelService:
         title: str,
         author: str,
         target_chapters: int,
-        target_words_per_chapter: int = 3500,
+        target_words_per_chapter: int = AppConfig.DEFAULT_WORDS_PER_CHAPTER,
         premise: str = "",
         genre: str = "",
     ) -> NovelDTO:

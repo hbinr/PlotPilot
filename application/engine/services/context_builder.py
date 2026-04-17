@@ -21,6 +21,7 @@ from domain.novel.repositories.foreshadowing_repository import ForeshadowingRepo
 from domain.ai.services.vector_store import VectorStore
 from domain.ai.services.embedding_service import EmbeddingService
 from application.engine.services.context_budget_allocator import ContextBudgetAllocator
+from application.config import AppConfig
 
 if TYPE_CHECKING:
     from application.engine.dtos.scene_director_dto import SceneDirectorAnalysis
@@ -99,7 +100,7 @@ class ContextBuilder:
         novel_id: str,
         chapter_number: int,
         outline: str,
-        max_tokens: int = 35000,
+        max_tokens: int = AppConfig.CONTEXT_MAX_TOKENS,
         scene_director: Optional[Dict[str, Any]] = None,
     ) -> str:
         """构建上下文（使用预算分配器）
@@ -129,7 +130,7 @@ class ContextBuilder:
         novel_id: str,
         chapter_number: int,
         outline: str,
-        max_tokens: int = 35000,
+        max_tokens: int = AppConfig.CONTEXT_MAX_TOKENS,
         scene_director: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """构建结构化上下文，返回详细信息
@@ -190,7 +191,7 @@ class ContextBuilder:
             },
         }
 
-    def magnify_outline_to_beats(self, chapter_number: int, outline: str, target_chapter_words: int = 3500) -> List[Beat]:
+    def magnify_outline_to_beats(self, chapter_number: int, outline: str, target_chapter_words: int = AppConfig.DEFAULT_WORDS_PER_CHAPTER) -> List[Beat]:
         """节拍放大器：将章节大纲拆分为微观节拍
 
         核心策略：

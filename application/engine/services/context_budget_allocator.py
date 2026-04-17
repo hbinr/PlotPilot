@@ -23,6 +23,7 @@ from infrastructure.persistence.database.story_node_repository import StoryNodeR
 from domain.ai.services.vector_store import VectorStore
 from domain.ai.services.embedding_service import EmbeddingService
 from application.ai.vector_retrieval_facade import VectorRetrievalFacade
+from application.config import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ class ContextSlot:
 class BudgetAllocation:
     """预算分配结果"""
     slots: Dict[str, ContextSlot] = field(default_factory=dict)
-    total_budget: int = 35000
+    total_budget: int = AppConfig.CONTEXT_MAX_TOKENS
     used_tokens: int = 0
     remaining_tokens: int = 0
     
@@ -196,7 +197,7 @@ class ContextBudgetAllocator:
         novel_id: str,
         chapter_number: int,
         outline: str,
-        total_budget: int = 35000,
+        total_budget: int = AppConfig.CONTEXT_MAX_TOKENS,
         scene_director: Optional[Dict[str, Any]] = None,
     ) -> BudgetAllocation:
         """执行预算分配

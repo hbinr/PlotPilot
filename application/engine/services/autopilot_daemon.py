@@ -25,6 +25,7 @@ from application.workflows.auto_novel_generation_workflow import AutoNovelGenera
 from application.engine.services.chapter_aftermath_pipeline import ChapterAftermathPipeline
 from application.engine.services.style_constraint_builder import build_style_summary
 from application.engine.services.word_control_service import effective_length
+from application.config import AppConfig
 from domain.novel.value_objects.chapter_id import ChapterId
 
 logger = logging.getLogger(__name__)
@@ -661,7 +662,7 @@ class AutopilotDaemon:
 
         chapter_num = next_chapter_node.number
         outline = next_chapter_node.outline or next_chapter_node.description or next_chapter_node.title
-        target_word_count = max(1, int(getattr(novel, "target_words_per_chapter", 3500) or 3500))
+        target_word_count = max(1, int(getattr(novel, "target_words_per_chapter", AppConfig.DEFAULT_WORDS_PER_CHAPTER) or AppConfig.DEFAULT_WORDS_PER_CHAPTER))
 
         if needs_buffer:
             # 优先使用题材专项缓冲章模板
